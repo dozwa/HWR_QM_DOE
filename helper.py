@@ -1184,15 +1184,57 @@ def _finde_kodierte_spalte(df_columns: list, faktor_name: str) -> Optional[str]:
     return None
 
 
+def _parse_faktoren_aus_excel(daten: pd.DataFrame) -> List[Dict]:
+    """Erkennt Faktoren automatisch aus den Spaltenheadern einer DoE-Excel-Datei."""
+    faktoren = []
+    for col in daten.columns:
+        # Pattern: "Name (kodiert)" oder "Name_coded"
+        if "(kodiert)" in col:
+            name = col.replace(" (kodiert)", "").strip()
+        elif col.endswith("_coded"):
+            name = col[:-6].strip()
+        else:
+            continue
+        # Einheit und Originalwerte aus korrespondierender Spalte suchen
+        einheit = "?"
+        low, high = -1.0, 1.0
+        for orig_col in daten.columns:
+            if orig_col.startswith(name) and orig_col != col and "kodiert" not in orig_col and "coded" not in orig_col:
+                # Einheit aus Klammer extrahieren: "Winkel (Grad)" → "Grad"
+                import re
+                m = re.search(r"\(([^)]+)\)", orig_col)
+                if m:
+                    einheit = m.group(1)
+                vals = daten[orig_col].dropna()
+                if len(vals) > 0:
+                    low = float(vals.min())
+                    high = float(vals.max())
+                break
+        faktoren.append({"name": name, "einheit": einheit, "low": low, "high": high})
+    return faktoren
+
+
 def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
                  mit_interaktionen: bool = True) -> Any:
     """
     Fittet ein OLS-Regressionsmodell: ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
 
     daten: DataFrame mit kodierten Faktorspalten + 'Ergebnis' Spalte
-    faktoren: Liste der Faktor-Dicts
+    faktoren: Liste der Faktor-Dicts (werden automatisch aus Excel erkannt wenn leer)
     """
     from statsmodels.formula.api import ols
+
+    # Auto-Detect: Faktoren aus Excel-Headern parsen wenn Liste leer
+    if not faktoren:
+        faktoren = _parse_faktoren_aus_excel(daten)
+        if not faktoren:
+            raise ValueError(
+                "Keine Faktoren angegeben und keine kodierten Spalten "
+                "(z.B. 'Name (kodiert)') in den Daten gefunden.\n"
+                f"Vorhandene Spalten: {daten.columns.tolist()}"
+            )
+        print(f"ℹ️ {len(faktoren)} Faktoren automatisch aus Excel erkannt: "
+              f"{', '.join(f['name'] for f in faktoren)}")
 
     # Faktor-Spaltennamen (kodiert) robust erkennen, lesbar benennen
     import re
@@ -2000,6 +2042,224 @@ def zeige_optimierung(ergebnis: Dict):
             <strong>Zielweite:</strong> {ergebnis['zielweite']:.0f} cm
         </p>
         {sigma_html}
+    </div>"""
+    display(HTML(html))
+
+
+def zeige_regressionsformel(modell, faktoren: List[Dict]):
+    """
+    Zeigt die Regressionsformel vollständig gerendert als HTML/LaTeX an,
+    mit echten Faktornamen und Koeffizienten.
+    """
+    fn = modell._faktor_namen
+    params = modell.params
+    intercept = params.get("Intercept", 0.0)
+
+    # Mapping kodierter Name → lesbarer Name mit Einheit
+    name_map = {}
+    for i, f in enumerate(faktoren):
+        if i < len(fn):
+            name_map[fn[i]] = f["name"]
+
+    # Formel in LaTeX aufbauen
+    latex = f"\\hat{{y}} = {intercept:.2f}"
+
+    # Haupteffekte
+    for name in fn:
+        beta = params.get(name, 0.0)
+        if abs(beta) < 1e-10:
+            continue
+        anzeige = name_map.get(name, name)
+        vorzeichen = "+" if beta > 0 else "-"
+        latex += f" {vorzeichen} {abs(beta):.2f} \\cdot x_{{\\text{{{anzeige}}}}}"
+
+    # Interaktionen
+    for i in range(len(fn)):
+        for j in range(i + 1, len(fn)):
+            col = f"{fn[i]}:{fn[j]}"
+            beta = params.get(col, 0.0)
+            if abs(beta) < 1e-10:
+                continue
+            n1 = name_map.get(fn[i], fn[i])
+            n2 = name_map.get(fn[j], fn[j])
+            vorzeichen = "+" if beta > 0 else "-"
+            latex += (f" {vorzeichen} {abs(beta):.2f} \\cdot "
+                      f"x_{{\\text{{{n1}}}}} \\cdot x_{{\\text{{{n2}}}}}")
+
+    # Kodierungstabelle
+    kodierung_rows = ""
+    for i, f in enumerate(faktoren):
+        if i < len(fn):
+            center = (f["low"] + f["high"]) / 2
+            half_range = (f["high"] - f["low"]) / 2
+            kodierung_rows += f"""<tr>
+                <td style="padding:4px 8px;">x<sub>{f['name']}</sub></td>
+                <td style="padding:4px 8px;">{f['name']}</td>
+                <td style="padding:4px 8px; text-align:center;">
+                    ({f['name']} − {center:.1f}) / {half_range:.1f}</td>
+                <td style="padding:4px 8px; text-align:center;">
+                    −1 → {f['low']:.1f} {f['einheit']}</td>
+                <td style="padding:4px 8px; text-align:center;">
+                    +1 → {f['high']:.1f} {f['einheit']}</td>
+            </tr>"""
+
+    html = f"""
+    <div style="padding:16px; background:#F9FAFB; border:1px solid #E5E7EB;
+                border-radius:8px; margin:10px 0;">
+        <h4 style="margin:0 0 12px 0;">📐 Regressionsmodell</h4>
+        <div style="padding:12px; background:white; border:1px solid #D1D5DB;
+                    border-radius:6px; font-size:1.1em; overflow-x:auto;">
+            $${latex}$$
+        </div>
+        <p style="margin:12px 0 4px 0; font-size:0.9em; color:{GRAY};">
+            Alle x-Werte sind <strong>kodiert</strong> (−1 = niedrig, +1 = hoch).
+            ŷ = vorhergesagte Wurfweite in cm.
+            R² = {modell.rsquared:.3f}, R²(adj) = {modell.rsquared_adj:.3f},
+            MSE = {modell.mse_resid:.2f}
+        </p>
+        <details style="margin-top:8px;">
+            <summary style="cursor:pointer; font-weight:bold; font-size:0.9em;
+                           color:#2563EB;">Kodierungstabelle anzeigen</summary>
+            <table style="border-collapse:collapse; margin-top:6px; font-size:0.9em;
+                          border:1px solid #E5E7EB;">
+                <tr style="background:{LIGHT_BLUE};">
+                    <th style="padding:4px 8px;">Variable</th>
+                    <th style="padding:4px 8px;">Faktor</th>
+                    <th style="padding:4px 8px;">Kodierung</th>
+                    <th style="padding:4px 8px;">Niedrig (−1)</th>
+                    <th style="padding:4px 8px;">Hoch (+1)</th>
+                </tr>
+                {kodierung_rows}
+            </table>
+        </details>
+    </div>"""
+    display(HTML(html))
+
+
+def prognostiziere(modell, faktoren: List[Dict],
+                   werte: Dict[str, float],
+                   sigma_setting: float = 0.1) -> Dict:
+    """
+    Prognosetool: Vorhersage für beliebige Faktoreinstellungen.
+
+    werte: Dict mit Faktornamen als Keys und kodierten Werten (-1 bis +1)
+           ODER Originalwerten (werden automatisch kodiert wenn |Wert| > 1.5).
+    """
+    fn = modell._faktor_namen
+
+    # Werte-Vektor aufbauen und ggf. auto-kodieren
+    x_coded = np.zeros(len(fn))
+    for i, f in enumerate(faktoren):
+        if i >= len(fn):
+            break
+        val = werte.get(f["name"], 0.0)
+        # Auto-Kodierung: wenn der Wert außerhalb [-1.5, 1.5] liegt,
+        # ist es wahrscheinlich ein Originalwert
+        center = (f["low"] + f["high"]) / 2
+        half_range = (f["high"] - f["low"]) / 2
+        if half_range > 0 and abs(val) > 1.5:
+            x_coded[i] = (val - center) / half_range
+        else:
+            x_coded[i] = val
+
+    # Vorhersage via statsmodels
+    import statsmodels.api as sm
+    pred_dict = {name: x_coded[idx] for idx, name in enumerate(fn)}
+    for i in range(len(fn)):
+        for j in range(i + 1, len(fn)):
+            col = f"{fn[i]}:{fn[j]}"
+            if col in modell.params.index:
+                pred_dict[col] = x_coded[i] * x_coded[j]
+    pred_df = pd.DataFrame([pred_dict])
+    pred_df = pred_df.reindex(
+        columns=[c for c in modell.params.index if c != "Intercept"],
+        fill_value=0
+    )
+    pred_df = sm.add_constant(pred_df)
+
+    prediction = modell.get_prediction(pred_df)
+    pred_value = prediction.predicted_mean[0]
+    summary = prediction.summary_frame(alpha=0.05)
+
+    # Erwartete Streuung
+    sigma = np.sqrt(_transmitted_variance(x_coded, modell, sigma_setting))
+
+    return {
+        "vorhersage": pred_value,
+        "ci_low": summary["mean_ci_lower"].values[0],
+        "ci_high": summary["mean_ci_upper"].values[0],
+        "pi_low": summary["obs_ci_lower"].values[0],
+        "pi_high": summary["obs_ci_upper"].values[0],
+        "sigma": sigma,
+        "x_coded": x_coded,
+    }
+
+
+def zeige_prognose(ergebnis: Dict, faktoren: List[Dict],
+                   werte: Dict[str, float], zielweite: float = None):
+    """Zeigt das Prognoseergebnis als formatierte HTML-Box an."""
+    pred = ergebnis["vorhersage"]
+    x_coded = ergebnis["x_coded"]
+
+    # Einstellungstabelle
+    rows = ""
+    for i, f in enumerate(faktoren):
+        if i >= len(x_coded):
+            break
+        center = (f["low"] + f["high"]) / 2
+        half_range = (f["high"] - f["low"]) / 2
+        original = center + x_coded[i] * half_range
+        rows += f"""<tr>
+            <td style="padding:4px 8px; font-weight:bold;">{f['name']}</td>
+            <td style="padding:4px 8px; text-align:right;">
+                {original:.1f} {f['einheit']}</td>
+            <td style="padding:4px 8px; text-align:right; color:{GRAY};">
+                ({x_coded[i]:+.2f})</td>
+        </tr>"""
+
+    # Zielweiten-Vergleich
+    ziel_html = ""
+    if zielweite is not None:
+        abw = pred - zielweite
+        farbe = GREEN if abs(abw) < 5 else (ORANGE if abs(abw) < 15 else RED)
+        ziel_html = f"""
+        <p style="margin:6px 0;">
+            <strong>Zielweite:</strong> {zielweite:.0f} cm &nbsp;
+            <strong>Abweichung:</strong>
+            <span style="color:{farbe}; font-weight:bold;">{abw:+.1f} cm</span>
+        </p>"""
+
+    html = f"""
+    <div style="padding:14px; background:#F0F9FF; border:1px solid #BFDBFE;
+                border-radius:8px; margin:10px 0;">
+        <h4 style="margin:0 0 8px 0;">🔮 Prognose</h4>
+        <table style="border-collapse:collapse; margin-bottom:8px;">
+            <tr style="background:{LIGHT_BLUE};">
+                <th style="padding:4px 8px; text-align:left;">Faktor</th>
+                <th style="padding:4px 8px;">Einstellung</th>
+                <th style="padding:4px 8px;">Kodiert</th>
+            </tr>
+            {rows}
+        </table>
+        <div style="padding:10px; background:white; border:1px solid #D1D5DB;
+                    border-radius:6px;">
+            <p style="margin:4px 0; font-size:1.15em;">
+                <strong>Vorhergesagte Wurfweite: {pred:.1f} cm</strong></p>
+            <p style="margin:4px 0;">
+                <strong>Konfidenzintervall (95%):</strong>
+                [{ergebnis['ci_low']:.1f}, {ergebnis['ci_high']:.1f}] cm
+                <span style="color:{GRAY}; font-size:0.85em;">
+                    &mdash; wo liegt der wahre Mittelwert?</span></p>
+            <p style="margin:4px 0;">
+                <strong>Vorhersageintervall (95%):</strong>
+                [{ergebnis['pi_low']:.1f}, {ergebnis['pi_high']:.1f}] cm
+                <span style="color:{GRAY}; font-size:0.85em;">
+                    &mdash; wo landet der nächste Wurf?</span></p>
+            <p style="margin:4px 0;">
+                <strong>Erwartete Streuung:</strong>
+                σ ≈ {ergebnis['sigma']:.1f} cm</p>
+            {ziel_html}
+        </div>
     </div>"""
     display(HTML(html))
 
