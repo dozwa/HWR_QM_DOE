@@ -1,0 +1,79 @@
+# Statapult Simulator - Standard-Konfiguration
+# Alle physikalischen Konstanten, Faktorbereiche und Rauschparameter.
+
+catapult:
+  arm_length_cm: 30.0
+  arm_mass_g: 50.0
+  k_base: 80.0            # Basis-Federkonstante des Gummibands (N/m)
+  efficiency: 0.78         # Energieuebertragungs-Effizienz (0-1)
+  rest_angle_deg: 110.0    # Ruhewinkel des Arms (Grad)
+
+physics:
+  gravity: 9.81
+  air_density: 1.225
+  drag_coefficient: 0.47   # Standard Kugel-Cd
+  enable_drag: false
+
+ball_types:
+  pingpong:
+    mass_g: 2.7
+    radius_cm: 2.0
+    drag_coefficient: 0.40
+  foam:
+    mass_g: 10.0
+    radius_cm: 2.5
+    drag_coefficient: 0.50
+  rubber:
+    mass_g: 25.0
+    radius_cm: 2.0
+    drag_coefficient: 0.47
+  steel:
+    mass_g: 45.0
+    radius_cm: 1.2
+    drag_coefficient: 0.45
+
+noise:
+  sigma_measurement: 1.5
+  sigma_setup: 2.0
+  sigma_rubber: 0.5
+  sigma_release: 1.0
+  sigma_wind_turbulence: 0.3
+  operator_sigma: 1.0
+  drift_rate: 0.0
+
+factors:
+  abzugswinkel:
+    low: 130
+    high: 170
+    default: 150
+    unit: Grad
+  stoppwinkel:
+    low: 70
+    high: 110
+    default: 90
+    unit: Grad
+  gummiband_position:
+    low: 8
+    high: 18
+    default: 13
+    unit: cm
+  becherposition:
+    low: 8
+    high: 22
+    default: 15
+    unit: cm
+  pin_hoehe:
+    low: 8
+    high: 18
+    default: 13
+    unit: cm
+  ballgewicht:
+    low: 5
+    high: 45
+    default: 10
+    unit: g
+  wind:
+    low: -2
+    high: 2
+    default: 0
+    unit: m/s
