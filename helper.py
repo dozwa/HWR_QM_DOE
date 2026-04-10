@@ -1194,18 +1194,32 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     """
     from statsmodels.formula.api import ols
 
-    # Faktor-Spaltennamen (kodiert) robust erkennen und auf X1, X2, ... mappen
+    # Faktor-Spaltennamen (kodiert) robust erkennen, lesbar benennen
+    import re
     faktor_namen = []
     rename_map = {}
     fehlende = []
+    _used_names = set()
     for i, f in enumerate(faktoren):
-        clean_name = f"X{i+1}"
+        # Lesbarer Name: Sonderzeichen → Unterstrich, aber Grundname beibehalten
+        clean = re.sub(r"[^A-Za-z0-9äöüÄÖÜß]", "_", f["name"]).strip("_")
+        clean = re.sub(r"_+", "_", clean)
+        if not clean or not clean[0].isalpha():
+            clean = f"F{i+1}_{clean}"
+        # Duplikate vermeiden
+        base = clean
+        cnt = 2
+        while clean in _used_names:
+            clean = f"{base}_{cnt}"
+            cnt += 1
+        _used_names.add(clean)
+
         gefunden = _finde_kodierte_spalte(daten.columns.tolist(), f["name"])
         if gefunden:
-            rename_map[gefunden] = clean_name
+            rename_map[gefunden] = clean
         else:
             fehlende.append(f["name"])
-        faktor_namen.append(clean_name)
+        faktor_namen.append(clean)
 
     if fehlende:
         raise ValueError(
