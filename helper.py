@@ -219,7 +219,8 @@ def _save_fig(projekt: Projekt, fig: plt.Figure, name: str):
 # 2b. ZIELSCHEIBEN-VISUALISIERUNG
 # ═══════════════════════════════════════════════════════════════════
 
-def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D"):
+def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D",
+                            max_range=None):
     """Zeichnet den Zielscheiben-Hintergrund."""
     if modus == "2D":
         # Volle 2D-Zielscheibe
@@ -228,8 +229,8 @@ def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D"):
             ax.add_patch(circle)
         ax.axhline(0, color=GRAY, linewidth=0.5, linestyle="--", alpha=0.4)
         ax.axvline(0, color=GRAY, linewidth=0.5, linestyle="--", alpha=0.4)
-        if toleranz:
-            tol_circle = plt.Circle((0, 0), toleranz / 100,
+        if toleranz and max_range:
+            tol_circle = plt.Circle((0, 0), toleranz / max_range,
                                      fill=False, edgecolor=GREEN, linewidth=2, linestyle="--")
             ax.add_patch(tol_circle)
         ax.set_xlim(-1.3, 1.3)
@@ -266,10 +267,12 @@ def plot_zielscheibe(daten_weite, ziel, toleranz, modus="1D",
 
     if modus == "2D" and daten_quer is not None:
         # Normalisiere auf Zielscheiben-Skala
-        max_range = max(toleranz * 2, np.ptp(daten_weite), np.ptp(daten_quer)) * 1.2
+        max_range = max(toleranz * 2,
+                        np.max(daten_weite) - np.min(daten_weite),
+                        np.max(daten_quer) - np.min(daten_quer)) * 1.2
         x_norm = (daten_weite - ziel) / max_range
         y_norm = daten_quer / max_range
-        _draw_target_background(ax, modus="2D", toleranz=toleranz)
+        _draw_target_background(ax, modus="2D", toleranz=toleranz, max_range=max_range)
         ax.scatter(x_norm, y_norm, c=farbe, s=60, zorder=5,
                    edgecolors="white", linewidths=0.8)
         ax.set_xlabel("Weite (relativ zum Ziel)")
@@ -301,14 +304,14 @@ def plot_zielscheibe(daten_weite, ziel, toleranz, modus="1D",
 
 def plot_4_zielscheiben_referenz():
     """Plottet die 4 Referenz-Zielscheiben (Accuracy × Precision)."""
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     fig, axes = plt.subplots(2, 2, figsize=(8, 8))
 
     configs = [
-        ("Hohe Accuracy\nHohe Precision", np.random.normal(0, 0.08, (15, 2)), GREEN),
-        ("Niedrige Accuracy\nHohe Precision", np.random.normal(0, 0.08, (15, 2)) + [0.5, 0.3], ORANGE),
-        ("Hohe Accuracy\nNiedrige Precision", np.random.normal(0, 0.35, (15, 2)), BLUE),
-        ("Niedrige Accuracy\nNiedrige Precision", np.random.normal(0, 0.35, (15, 2)) + [0.4, -0.3], RED),
+        ("Hohe Accuracy\nHohe Precision", rng.normal(0, 0.08, (15, 2)), GREEN),
+        ("Niedrige Accuracy\nHohe Precision", rng.normal(0, 0.08, (15, 2)) + [0.5, 0.3], ORANGE),
+        ("Hohe Accuracy\nNiedrige Precision", rng.normal(0, 0.35, (15, 2)), BLUE),
+        ("Niedrige Accuracy\nNiedrige Precision", rng.normal(0, 0.35, (15, 2)) + [0.4, -0.3], RED),
     ]
 
     for ax, (title, pts, col) in zip(axes.flat, configs):
@@ -657,10 +660,15 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
 
     # Varianzkomponenten (negative auf 0 setzen)
     var_repeatability = max(0, ms_residual)
-    var_interact = max(0, (ms_interact - ms_residual) / n_wiederholungen) \
-        if ms_interact > 0 else 0
-    var_reproducibility = max(0, (ms_person - ms_interact) / (n_teile * n_wiederholungen))
-    var_teil = max(0, (ms_teil - ms_interact) / (n_personen * n_wiederholungen))
+    if _hat_interaktion:
+        var_interact = max(0, (ms_interact - ms_residual) / n_wiederholungen)
+        var_reproducibility = max(0, (ms_person - ms_interact) / (n_teile * n_wiederholungen))
+        var_teil = max(0, (ms_teil - ms_interact) / (n_personen * n_wiederholungen))
+    else:
+        # Ohne Interaktionsterm: E(MS_Person) = σ² + n_teile·n_rep·σ²_person
+        var_interact = 0
+        var_reproducibility = max(0, (ms_person - ms_residual) / (n_teile * n_wiederholungen))
+        var_teil = max(0, (ms_teil - ms_residual) / (n_personen * n_wiederholungen))
 
     var_grr = var_repeatability + var_reproducibility + var_interact
     var_total = var_teil + var_grr
@@ -1157,8 +1165,9 @@ def erstelle_doe_excel(versuchsplan: pd.DataFrame, faktoren: List[Dict],
         c.border = thin_border
 
     # Spaltenbreiten
+    from openpyxl.utils import get_column_letter
     for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[chr(64 + min(col_idx, 26))].width = 18
+        ws.column_dimensions[get_column_letter(col_idx)].width = 18
 
     wb.save(output_path)
     return os.path.abspath(output_path)
@@ -1323,15 +1332,19 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
 
     df = modell._daten.copy()
     faktor_namen = modell._faktor_namen
+    faktor_details = getattr(modell, "_faktor_details", [])
     log = []
 
     # Aktuelle Terme sammeln
     current_terms = [t for t in modell.params.index if t != "Intercept"]
+    # Terme die durch Hierarchie geschützt sind (nicht erneut prüfen)
+    protected_terms = set()
 
     while True:
-        # Finde Term mit höchstem p-Wert
+        # Finde Term mit höchstem p-Wert (geschützte überspringen)
         p_values = modell.pvalues.drop("Intercept", errors="ignore")
         p_values = p_values[p_values.index.isin(current_terms)]
+        p_values = p_values.drop(labels=list(protected_terms), errors="ignore")
 
         if p_values.empty:
             break
@@ -1340,7 +1353,7 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         worst_p = p_values[worst_term]
 
         if worst_p <= alpha:
-            break  # Alle signifikant
+            break  # Alle verbleibenden sind signifikant
 
         # Hierarchie-Check: Ist worst_term ein Haupteffekt?
         is_haupteffekt = ":" not in worst_term
@@ -1357,22 +1370,16 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
                         )
                         break
             if protected:
-                # Markiere als geprüft, versuche nächsten
-                p_values = p_values.drop(worst_term)
-                if p_values.empty:
-                    break
-                # Versuche den nächsthöheren p-Wert
-                worst_term = p_values.idxmax()
-                worst_p = p_values[worst_term]
-                if worst_p <= alpha:
-                    break
-                if ":" not in worst_term:
-                    # Auch diesen prüfen...
-                    continue
+                protected_terms.add(worst_term)
+                continue
 
         # Term entfernen
         current_terms.remove(worst_term)
+        protected_terms.discard(worst_term)
         log.append(f"❌ {worst_term} entfernt (p={worst_p:.3f})")
+
+        # Nach Entfernung einer Interaktion: Schutzstatus neu prüfen
+        protected_terms.clear()
 
         if not current_terms:
             log.append("⚠️ Alle Terme entfernt – Modell nur mit Intercept")
@@ -1382,7 +1389,7 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         formel = "Y ~ " + " + ".join(current_terms)
         modell = ols(formel, data=df).fit()
         modell._faktor_namen = faktor_namen
-        modell._faktor_details = getattr(modell, "_faktor_details", [])
+        modell._faktor_details = faktor_details
         modell._daten = df
 
     if not log:
@@ -1571,7 +1578,21 @@ def pruefe_lack_of_fit(modell, daten: pd.DataFrame) -> Dict:
         return {"test_moeglich": False, "grund": "Zu wenig Centerpoints"}
 
     # Vorhersage am Centerpoint
-    pred_at_center = modell.params["Intercept"]  # Alle kodierten Werte = 0
+    # Stetige Faktoren sind 0, binäre Faktoren sind -1 im Centerpoint
+    pred_at_center = modell.params["Intercept"]
+    if len(cp_data) > 0:
+        cp_row = cp_data[faktor_namen].iloc[0]
+        for term, coef in modell.params.items():
+            if term == "Intercept":
+                continue
+            if ":" in term:
+                parts = term.split(":")
+                val = 1.0
+                for p in parts:
+                    val *= cp_row.get(p, 0.0)
+                pred_at_center += coef * val
+            elif term in cp_row.index:
+                pred_at_center += coef * cp_row[term]
 
     # Tatsächliche Centerpoint-Werte
     if "Y" in cp_data.columns:
@@ -1701,9 +1722,8 @@ def plot_kontur(modell, faktoren: List[Dict], zielweite: float,
 
     grid_df = grid_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    import statsmodels.api as sm
-    grid_df_const = sm.add_constant(grid_df)
-    Z = modell.predict(grid_df_const).values.reshape(n_grid, n_grid)
+    grid_df.insert(0, "Intercept", 1.0)
+    Z = modell.predict(grid_df).values.reshape(n_grid, n_grid)
 
     # Plot
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -1732,7 +1752,6 @@ def plot_kontur(modell, faktoren: List[Dict], zielweite: float,
 def _predict_grid(modell, faktor_idx: Tuple[int, int],
                   n_grid: int = 50) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Erzeugt ein Vorhersage-Grid für zwei Faktoren. Gibt (X1, X2, Z) zurück."""
-    import statsmodels.api as sm
     f1_idx, f2_idx = faktor_idx
     fn = modell._faktor_namen
 
@@ -1752,8 +1771,8 @@ def _predict_grid(modell, faktor_idx: Tuple[int, int],
 
     grid_df = grid_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    grid_df_const = sm.add_constant(grid_df)
-    Z = modell.predict(grid_df_const).values.reshape(n_grid, n_grid)
+    grid_df.insert(0, "Intercept", 1.0)
+    Z = modell.predict(grid_df).values.reshape(n_grid, n_grid)
     return X1, X2, Z
 
 
@@ -1923,8 +1942,7 @@ def optimiere_einstellungen(modell, zielweite: float,
         pred_df = pd.DataFrame([pred_dict])
         pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                    fill_value=0)
-        import statsmodels.api as sm
-        pred_df = sm.add_constant(pred_df)
+        pred_df.insert(0, "Intercept", 1.0)
         return modell.predict(pred_df).values[0]
 
     def objective(x_coded):
@@ -1970,8 +1988,7 @@ def optimiere_einstellungen(modell, zielweite: float,
     pred_df = pd.DataFrame([pred_dict])
     pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    import statsmodels.api as sm
-    pred_df = sm.add_constant(pred_df)
+    pred_df.insert(0, "Intercept", 1.0)
 
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]
@@ -2162,8 +2179,7 @@ def prognostiziere(modell, faktoren: List[Dict],
         else:
             x_coded[i] = val
 
-    # Vorhersage via statsmodels
-    import statsmodels.api as sm
+    # Vorhersage
     pred_dict = {name: x_coded[idx] for idx, name in enumerate(fn)}
     for i in range(len(fn)):
         for j in range(i + 1, len(fn)):
@@ -2175,7 +2191,7 @@ def prognostiziere(modell, faktoren: List[Dict],
         columns=[c for c in modell.params.index if c != "Intercept"],
         fill_value=0
     )
-    pred_df = sm.add_constant(pred_df)
+    pred_df.insert(0, "Intercept", 1.0)
 
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]
