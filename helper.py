@@ -375,6 +375,170 @@ def formatiere_charter(projekt: Projekt) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════
+# 3b. MSA-TEMPLATE-GENERIERUNG
+# ═══════════════════════════════════════════════════════════════════
+
+# Excel-Styling-Konstanten (openpyxl, lazy importiert)
+_MSA_STYLES_LOADED = False
+_HEADER_FONT = _HEADER_FILL = _META_KEY_FONT = _META_VAL_FONT = None
+_NORMAL_FONT = _THIN_BORDER = _CENTER_ALIGN = _LEFT_ALIGN = None
+
+
+def _ensure_msa_styles():
+    """Lädt openpyxl-Styling-Konstanten beim ersten Aufruf."""
+    global _MSA_STYLES_LOADED, _HEADER_FONT, _HEADER_FILL, _META_KEY_FONT
+    global _META_VAL_FONT, _NORMAL_FONT, _THIN_BORDER, _CENTER_ALIGN, _LEFT_ALIGN
+    if _MSA_STYLES_LOADED:
+        return
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    _HEADER_FONT = Font(name="Calibri", bold=True, size=11, color="FFFFFF")
+    _HEADER_FILL = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    _META_KEY_FONT = Font(name="Calibri", bold=True, size=11)
+    _META_VAL_FONT = Font(name="Calibri", size=11, italic=True, color="666666")
+    _NORMAL_FONT = Font(name="Calibri", size=11)
+    _THIN_BORDER = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"), bottom=Side(style="thin"),
+    )
+    _CENTER_ALIGN = Alignment(horizontal="center", vertical="center")
+    _LEFT_ALIGN = Alignment(horizontal="left", vertical="center")
+    _MSA_STYLES_LOADED = True
+
+
+def _msa_apply_header(cell):
+    _ensure_msa_styles()
+    cell.font = _HEADER_FONT
+    cell.fill = _HEADER_FILL
+    cell.alignment = _CENTER_ALIGN
+    cell.border = _THIN_BORDER
+
+
+def _msa_apply_data(cell, alignment=None):
+    _ensure_msa_styles()
+    cell.font = _NORMAL_FONT
+    cell.border = _THIN_BORDER
+    cell.alignment = alignment or _CENTER_ALIGN
+
+
+def _msa_write_metadata(ws, gruppenname, messmodus, start_row=1):
+    """Schreibt den Metadaten-Kopfblock und gibt die nächste Zeile zurück."""
+    _ensure_msa_styles()
+    from openpyxl.styles import Border, Font, Side
+    meta = [
+        ("Gruppe:", gruppenname if gruppenname else "<Gruppenname eintragen>"),
+        ("Datum:", date.today().strftime("%d.%m.%Y")),
+        ("Messmittel:", "<z.\u202fB. Maßband, Laser-Entfernungsmesser>"),
+        ("Messmodus:", messmodus),
+    ]
+    row = start_row
+    for key, value in meta:
+        key_cell = ws.cell(row=row, column=1, value=key)
+        key_cell.font = _META_KEY_FONT
+        key_cell.alignment = _LEFT_ALIGN
+        val_cell = ws.cell(row=row, column=2, value=value)
+        val_cell.font = _META_VAL_FONT
+        val_cell.alignment = _LEFT_ALIGN
+        val_cell.border = Border(bottom=Side(style="thin", color="AAAAAA"))
+        ws.merge_cells(start_row=row, start_column=2, end_row=row, end_column=4)
+        row += 1
+    row += 1  # Leerzeile
+    return row
+
+
+def _msa_build_type1(wb, gruppenname, num_personen, num_messungen, messmodus):
+    """Erstellt das Type-1-Blatt."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    ws = wb.active
+    ws.title = "Type-1"
+    data_start = _msa_write_metadata(ws, gruppenname, messmodus)
+
+    hint = ws.cell(row=data_start, column=1, value=(
+        "Anleitung: Alle Personen messen unabhängig denselben "
+        "Referenzpunkt (z.\u202fB. Klebestreifen auf dem Boden). "
+        "Referenzwert = bekannte Distanz in cm."))
+    hint.font = Font(name="Calibri", size=10, italic=True, color="888888")
+    ws.merge_cells(start_row=data_start, start_column=1,
+                   end_row=data_start, end_column=2 + num_personen)
+    data_start += 2
+
+    headers = ["Messung-Nr.", "Referenzwert (cm)"]
+    headers += [f"Person {p} (cm)" for p in range(1, num_personen + 1)]
+    for col_idx, h in enumerate(headers, start=1):
+        _msa_apply_header(ws.cell(row=data_start, column=col_idx, value=h))
+
+    for i in range(1, num_messungen + 1):
+        row = data_start + i
+        _msa_apply_data(ws.cell(row=row, column=1, value=i))
+        ref = ws.cell(row=row, column=2, value="<Ref>")
+        _msa_apply_data(ref)
+        ref.font = Font(name="Calibri", size=11, italic=True, color="999999")
+        for p in range(num_personen):
+            _msa_apply_data(ws.cell(row=row, column=3 + p, value=None))
+
+    ws.column_dimensions["A"].width = 16
+    ws.column_dimensions["B"].width = 20
+    for p in range(num_personen):
+        ws.column_dimensions[get_column_letter(3 + p)].width = 18
+
+
+def _msa_build_reproduzierbarkeit(wb, gruppenname, num_personen, num_wuerfe, messmodus):
+    """Erstellt das Reproduzierbarkeits-Blatt."""
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    ws = wb.create_sheet(title="Reproduzierbarkeit")
+    data_start = _msa_write_metadata(ws, gruppenname, messmodus)
+
+    hint = ws.cell(row=data_start, column=1, value=(
+        "Anleitung: Nach jedem Wurf den Auftrittspunkt markieren "
+        "(Kreppband). Jede Person misst unabhängig die Distanz – "
+        "ohne Absprache. Erst danach Markierung entfernen."))
+    hint.font = Font(name="Calibri", size=10, italic=True, color="888888")
+    ws.merge_cells(start_row=data_start, start_column=1,
+                   end_row=data_start, end_column=1 + num_personen)
+    data_start += 2
+
+    headers = ["Wurf-ID"]
+    headers += [f"Messung Person {p} (cm)" for p in range(1, num_personen + 1)]
+    for col_idx, h in enumerate(headers, start=1):
+        _msa_apply_header(ws.cell(row=data_start, column=col_idx, value=h))
+
+    for i in range(1, num_wuerfe + 1):
+        row = data_start + i
+        _msa_apply_data(ws.cell(row=row, column=1, value=i))
+        for p in range(num_personen):
+            _msa_apply_data(ws.cell(row=row, column=2 + p, value=None))
+
+    ws.column_dimensions["A"].width = 14
+    for p in range(num_personen):
+        ws.column_dimensions[get_column_letter(2 + p)].width = 24
+
+
+def generate_msa_template(gruppenname="", num_personen=3, num_messungen=10,
+                          num_wuerfe=10, messmodus="1D", output_path=None) -> str:
+    """Erzeugt MSA_Messung_Template.xlsx mit Type-1 und Reproduzierbarkeit."""
+    from openpyxl import Workbook
+    if num_personen < 2:
+        raise ValueError("Es werden mindestens 2 Personen benötigt.")
+    messmodus = messmodus.upper()
+    if messmodus not in ("1D", "2D"):
+        raise ValueError("Messmodus muss '1D' oder '2D' sein.")
+
+    wb = Workbook()
+    _msa_build_type1(wb, gruppenname, num_personen, num_messungen, messmodus)
+    _msa_build_reproduzierbarkeit(wb, gruppenname, num_personen, num_wuerfe, messmodus)
+
+    if output_path is None:
+        output_path = os.path.join(os.getcwd(), "MSA_Messung_Template.xlsx")
+    else:
+        output_path = os.path.abspath(output_path)
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    wb.save(output_path)
+    print(f"MSA-Template gespeichert: {output_path}")
+    return output_path
+
+
+# ═══════════════════════════════════════════════════════════════════
 # 4. MEASURE
 # ═══════════════════════════════════════════════════════════════════
 
@@ -449,20 +613,26 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
     df["Wurf_ID"] = df["Wurf_ID"].astype(str)
     df["Person"] = df["Person"].astype(str)
 
-    if len(df) < 3:
-        return {"fehler": "Zu wenig gültige Messwerte für die ANOVA."}
+    n_teile = df["Wurf_ID"].nunique()
+    n_personen = df["Person"].nunique()
 
-    # Zwei-Faktor-ANOVA (gekreuzt): Messwert ~ Wurf_ID + Person + Wurf_ID:Person
+    if len(df) < 3 or n_personen < 2:
+        return {"fehler": "Mindestens 2 Personen und 3 Messwerte benötigt."}
+
+    n_wiederholungen = max(1, len(df) // max(1, n_teile * n_personen))
+
+    # Bei nur 1 Messung pro Person/Wurf: additives Modell (ohne Interaktion),
+    # da das volle Modell saturiert wäre (df_residual = 0).
     try:
-        model = ols("Messwert ~ C(Wurf_ID) + C(Person) + C(Wurf_ID):C(Person)", data=df).fit()
+        if n_wiederholungen <= 1:
+            model = ols("Messwert ~ C(Wurf_ID) + C(Person)", data=df).fit()
+            _hat_interaktion = False
+        else:
+            model = ols("Messwert ~ C(Wurf_ID) + C(Person) + C(Wurf_ID):C(Person)", data=df).fit()
+            _hat_interaktion = True
         anova_table = sm.stats.anova_lm(model, typ=2)
     except Exception as e:
         return {"fehler": str(e)}
-
-    # Varianzkomponenten extrahieren
-    n_teile = df["Wurf_ID"].nunique()
-    n_personen = df["Person"].nunique()
-    n_wiederholungen = max(1, len(df) // max(1, n_teile * n_personen))
 
     def _safe_ms(source, col="sum_sq"):
         """Sichere Mean-Square-Berechnung (NaN/Inf → 0)."""
@@ -477,8 +647,13 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
 
     ms_teil = _safe_ms("C(Wurf_ID)")
     ms_person = _safe_ms("C(Person)")
-    ms_interact = _safe_ms("C(Wurf_ID):C(Person)")
     ms_residual = _safe_ms("Residual")
+
+    if _hat_interaktion:
+        ms_interact = _safe_ms("C(Wurf_ID):C(Person)")
+    else:
+        # Ohne Interaktionsterm: Residual enthält Repeatability + Interaktion
+        ms_interact = 0
 
     # Varianzkomponenten (negative auf 0 setzen)
     var_repeatability = max(0, ms_residual)
@@ -503,7 +678,7 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
     else:
         bewertung = "❌ Messsystem nicht akzeptabel"
 
-    return {
+    ergebnis = {
         "var_teil": var_teil,
         "var_repeatability": var_repeatability,
         "var_reproducibility": var_reproducibility,
@@ -519,6 +694,13 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
         "n_personen": n_personen,
         "n_wiederholungen": n_wiederholungen,
     }
+    if not _hat_interaktion:
+        ergebnis["hinweis"] = (
+            "Vereinfachtes Modell (ohne Interaktion): Bei nur 1 Messung pro "
+            "Person/Messpunkt kann die Interaktion nicht vom Messfehler getrennt "
+            "werden. Die Repeatability enthält daher auch den Interaktionsanteil."
+        )
+    return ergebnis
 
 
 def zeige_gage_rr(ergebnis: Dict):
@@ -572,6 +754,12 @@ def zeige_gage_rr(ergebnis: Dict):
     </table>
     <p><strong>%GRR (σ-Basis, AIAG):</strong> {ergebnis['pct_grr']:.1f}%</p>
     """
+    if "hinweis" in ergebnis:
+        html += f"""
+        <div style="padding:8px; border-left:3px solid {ORANGE}; background:{LIGHT_YELLOW};
+                    border-radius:4px; margin:8px 0; font-size:0.9em;">
+            ℹ️ {ergebnis['hinweis']}
+        </div>"""
     display(HTML(html))
 
     # ANOVA-Tabelle als Prio 2
@@ -707,20 +895,47 @@ def plot_baseline_histogramm(wuerfe: np.ndarray, ziel: float, toleranz: float) -
 
 # --- 5a. DoE-Generierung ---
 
+def _berechne_konfundierung(k: int, p: int) -> str:
+    """Erzeugt Konfundierungshinweis für 2^(k-p) Designs."""
+    buchstaben = [chr(65 + i) for i in range(k)]
+    if p == 1:
+        gen = "".join(buchstaben[:k - 1])
+        resolution = k if k <= 5 else 4
+        return (
+            f"Design: 2^({k}-1), Resolution {['', '', '', 'III', 'IV', 'V'][min(resolution, 5)]}.\n"
+            f"Generator: {buchstaben[-1]} = {gen}.\n"
+            f"Haupteffekte sind frei von Zweifach-Interaktionen."
+            if resolution >= 4 else
+            f"Design: 2^({k}-1), Resolution III.\n"
+            f"Generator: {buchstaben[-1]} = {gen}.\n"
+            f"⚠️ Haupteffekte sind mit Zweifach-Interaktionen konfundiert!"
+        )
+    elif p == 2:
+        resolution = 3 if k <= 5 else 4
+        return (
+            f"Design: 2^({k}-2), Resolution III.\n"
+            f"⚠️ Haupteffekte sind mit Zweifach-Interaktionen konfundiert!\n"
+            f"Dieses Design eignet sich nur zum Screening (viele Faktoren, wenig Runs)."
+        )
+    return f"2^({k}-{p}) fraktionelles Design."
+
+
 def generiere_versuchsplan(
     faktoren: List[Dict],
     wiederholungen: int = 3,
     blocking: bool = False,
     centerpoints: int = 3,
     seed: int = 42,
+    design: str = "voll",
 ) -> pd.DataFrame:
     """
     Generiert einen randomisierten Versuchsplan.
 
     faktoren: Liste von Dicts mit 'name', 'einheit', 'low', 'high'
-    wiederholungen: Anzahl Wiederholungen (2/3/4)
+    wiederholungen: Anzahl Wiederholungen (1-10)
     blocking: Ob in 2 Blöcke aufgeteilt wird
-    centerpoints: Anzahl Centerpoints (3/4/5)
+    centerpoints: Anzahl Centerpoints (0+)
+    design: "voll" (2^k), "halb" (2^(k-1)), "viertel" (2^(k-2))
 
     Rückgabe: DataFrame mit Versuchsplan (kodiert und Original)
     """
@@ -739,23 +954,34 @@ def generiere_versuchsplan(
     konfundierung = ""
 
     # Design-Auswahl
-    if k <= 4:
-        # Vollfaktoriell 2^k
+    if design == "voll":
         design_coded = np.array(list(_product([-1, 1], repeat=k)))
-        design_typ = f"2^{k} vollfaktoriell"
-    else:
-        # Fraktionell 2^(k-1): Basis-Design für (k-1) Faktoren,
-        # letzter Faktor als Produkt der Basisfaktoren (Generator = ABCD…)
+        design_typ = f"2^{k} vollfaktoriell ({2**k} Runs)"
+    elif design == "halb":
+        # 2^(k-1): letzter Faktor = Produkt aller Basisfaktoren
         basis = np.array(list(_product([-1, 1], repeat=k - 1)))
-        # Generator: letzter Faktor = Produkt aller Basisfaktoren
-        generated_col = np.prod(basis, axis=1, keepdims=True)
-        design_coded = np.hstack([basis, generated_col])
-        design_typ = f"2^({k}-1) fraktionell (Res. IV+)"
-
-        konfundierung = (
-            f"Faktor {k} ist konfundiert mit dem Produkt der Faktoren 1–{k-1}. "
-            "Zweifach-Interaktionen können mit Dreifach-Interaktionen konfundiert sein."
-        )
+        generated = np.prod(basis, axis=1, keepdims=True)
+        design_coded = np.hstack([basis, generated])
+        design_typ = f"2^({k}-1) halbfraktionell ({2**(k-1)} Runs)"
+        konfundierung = _berechne_konfundierung(k, 1)
+    elif design == "viertel":
+        if k < 4:
+            print("⚠️ Viertelfraktionell braucht ≥4 Faktoren. Nutze vollfaktoriell.")
+            design_coded = np.array(list(_product([-1, 1], repeat=k)))
+            design_typ = f"2^{k} vollfaktoriell ({2**k} Runs)"
+        else:
+            # 2^(k-2): zwei Generatoren
+            n_basis = k - 2
+            basis = np.array(list(_product([-1, 1], repeat=n_basis)))
+            # Generator 1: vorletzter Faktor = Produkt aller Basisfaktoren
+            gen1 = np.prod(basis, axis=1, keepdims=True)
+            # Generator 2: letzter Faktor = Produkt der letzten (n_basis-1) Basisfaktoren
+            gen2 = np.prod(basis[:, 1:], axis=1, keepdims=True)
+            design_coded = np.hstack([basis, gen1, gen2])
+            design_typ = f"2^({k}-2) viertelfraktionell ({2**(k-2)} Runs)"
+            konfundierung = _berechne_konfundierung(k, 2)
+    else:
+        raise ValueError(f"Unbekanntes Design: '{design}'. Erlaubt: 'voll', 'halb', 'viertel'.")
 
     n_basis = len(design_coded)
 
@@ -831,7 +1057,7 @@ def generiere_versuchsplan(
     df.attrs["centerpoints"] = centerpoints
     df.attrs["blocking"] = blocking
     df.attrs["n_gesamt"] = len(df)
-    df.attrs["konfundierung"] = konfundierung if k >= 5 else ""
+    df.attrs["konfundierung"] = konfundierung
 
     return df
 
@@ -940,6 +1166,24 @@ def erstelle_doe_excel(versuchsplan: pd.DataFrame, faktoren: List[Dict],
 
 # --- 5b. Modell-Fitting ---
 
+def _finde_kodierte_spalte(df_columns: list, faktor_name: str) -> Optional[str]:
+    """Findet die kodierte Spalte für einen Faktor, unabhängig vom Benennungsmuster."""
+    # Mögliche Muster: "Name_coded", "Name (kodiert)", "Name_kodiert"
+    kandidaten = [
+        f"{faktor_name}_coded",
+        f"{faktor_name} (kodiert)",
+        f"{faktor_name}_kodiert",
+    ]
+    for k in kandidaten:
+        if k in df_columns:
+            return k
+    # Fuzzy: Spalte die den Faktornamen enthält + "cod" oder "kod"
+    for col in df_columns:
+        if faktor_name.lower() in col.lower() and ("cod" in col.lower() or "kod" in col.lower()):
+            return col
+    return None
+
+
 def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
                  mit_interaktionen: bool = True) -> Any:
     """
@@ -950,20 +1194,36 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     """
     from statsmodels.formula.api import ols
 
-    # Faktor-Spaltennamen (kodiert) bereinigen für Formel
+    # Faktor-Spaltennamen (kodiert) robust erkennen und auf X1, X2, ... mappen
     faktor_namen = []
     rename_map = {}
+    fehlende = []
     for i, f in enumerate(faktoren):
         clean_name = f"X{i+1}"
-        orig_name = f"{f['name']}_coded"
-        rename_map[orig_name] = clean_name
+        gefunden = _finde_kodierte_spalte(daten.columns.tolist(), f["name"])
+        if gefunden:
+            rename_map[gefunden] = clean_name
+        else:
+            fehlende.append(f["name"])
         faktor_namen.append(clean_name)
 
+    if fehlende:
+        raise ValueError(
+            f"Kodierte Spalten nicht gefunden für: {fehlende}\n"
+            f"Vorhandene Spalten: {daten.columns.tolist()}"
+        )
+
     df = daten.rename(columns=rename_map).copy()
-    if "Ergebnis: Weite (cm)" in df.columns:
-        df = df.rename(columns={"Ergebnis: Weite (cm)": "Y"})
-    elif "Ergebnis" in df.columns:
-        df = df.rename(columns={"Ergebnis": "Y"})
+
+    # Ergebnis-Spalte finden
+    y_col = None
+    for col in df.columns:
+        col_lower = col.lower()
+        if "ergebnis" in col_lower or "result" in col_lower or "weite" in col_lower:
+            y_col = col
+            break
+    if y_col:
+        df = df.rename(columns={y_col: "Y"})
     else:
         # Letzte numerische Spalte als Y
         num_cols = df.select_dtypes(include=[np.number]).columns
@@ -2177,6 +2437,64 @@ def plot_vorher_nachher(baseline: np.ndarray, konfirmation: np.ndarray,
 # 8. EXPORT
 # ═══════════════════════════════════════════════════════════════════
 
+def exportiere_phase_auf_drive(projekt: Projekt, phase: str = None):
+    """Exportiert alle bisherigen Ergebnisse in einen Phase-Unterordner auf Drive."""
+    if phase is None:
+        phase = _aktuelle_phase(projekt)
+
+    save_dir = _fortschritt_verzeichnis(projekt)
+    if not save_dir:
+        print("⚠️ Kein Speicherort verfügbar.")
+        return
+
+    phase_dir = os.path.join(save_dir, phase)
+    os.makedirs(phase_dir, exist_ok=True)
+
+    dateien = []
+
+    # 1. Alle Figuren als PNG
+    for name, fig in projekt.figuren.items():
+        pfad = os.path.join(phase_dir, f"{name}.png")
+        fig.savefig(pfad, format="png", bbox_inches="tight", dpi=150, facecolor="white")
+        dateien.append(f"plots/{name}.png")
+
+    # 2. Alle CSVs
+    for name, df in projekt.csv_daten.items():
+        pfad = os.path.join(phase_dir, f"{name}.csv")
+        df.to_csv(pfad, index=False)
+        dateien.append(f"daten/{name}.csv")
+
+    # 3. Baseline-Daten
+    if len(projekt.baseline_wuerfe) > 0:
+        pfad = os.path.join(phase_dir, "baseline_wuerfe.csv")
+        pd.DataFrame({"Wurf_Nr": range(1, len(projekt.baseline_wuerfe) + 1),
+                       "Weite_cm": projekt.baseline_wuerfe}).to_csv(pfad, index=False)
+        dateien.append("baseline_wuerfe.csv")
+
+    # 4. Konfirmationsdaten
+    if len(projekt.konfirmation_wuerfe) > 0:
+        pfad = os.path.join(phase_dir, "konfirmation_wuerfe.csv")
+        pd.DataFrame({"Wurf_Nr": range(1, len(projekt.konfirmation_wuerfe) + 1),
+                       "Weite_cm": projekt.konfirmation_wuerfe}).to_csv(pfad, index=False)
+        dateien.append("konfirmation_wuerfe.csv")
+
+    # 5. Zusammenfassung
+    pfad = os.path.join(phase_dir, "zusammenfassung.txt")
+    with open(pfad, "w") as f:
+        f.write(_erstelle_zusammenfassung(projekt))
+    dateien.append("zusammenfassung.txt")
+
+    # 6. Fortschritt-JSON
+    speichere_fortschritt(projekt)
+
+    print(f"💾 {len(dateien)} Dateien in Google Drive gespeichert:")
+    print(f"   📂 {phase_dir}")
+    for d in dateien[:8]:
+        print(f"      • {d}")
+    if len(dateien) > 8:
+        print(f"      ... und {len(dateien) - 8} weitere")
+
+
 def exportiere_zip(projekt: Projekt, output_path: str = "DMAIC_Ergebnisse.zip") -> str:
     """Exportiert alle Figuren und Daten als ZIP-Datei."""
     buf = io.BytesIO()
@@ -2477,6 +2795,7 @@ def _recompute_derived(projekt: Projekt):
                 blocking=cfg.get("blocking", False),
                 centerpoints=cfg.get("centerpoints", 3),
                 seed=projekt.seed,
+                design=cfg.get("design", "voll"),
             )
         except Exception as e:
             print(f"⚠️ Versuchsplan konnte nicht regeneriert werden: {e}")
@@ -2594,6 +2913,73 @@ def lade_fortschritt(gruppenname: str, gruppennummer: int) -> Optional[Projekt]:
     except Exception as e:
         print(f"⚠️ Fortschritt konnte nicht geladen werden: {e}")
         return None
+
+
+def finde_speicherstaende() -> List[Dict]:
+    """Sucht im Drive und lokal nach vorhandenen DMAIC-Speicherständen."""
+    ergebnisse = []
+    for base in (_DRIVE_BASE, _LOCAL_BASE):
+        if not os.path.isdir(base):
+            continue
+        for ordner in sorted(os.listdir(base)):
+            pfad = os.path.join(base, ordner, "fortschritt.json")
+            if not os.path.exists(pfad):
+                continue
+            try:
+                with open(pfad) as f:
+                    d = json.load(f)
+                ergebnisse.append({
+                    "pfad": pfad,
+                    "gruppenname": d.get("gruppenname", "?"),
+                    "gruppennummer": d.get("gruppennummer", 0),
+                    "phase": d.get("_phase", "?"),
+                    "saved_at": d.get("_saved_at", "?"),
+                    "zielweite": d.get("zielweite", 0),
+                })
+            except Exception:
+                continue
+    return ergebnisse
+
+
+def zeige_speicherstand_auswahl(staende: List[Dict]):
+    """Zeigt eine nummerierte HTML-Tabelle aller Speicherstände."""
+    if not staende:
+        print("Keine Speicherstände gefunden.")
+        return
+
+    rows = ""
+    for i, s in enumerate(staende, 1):
+        try:
+            ts = datetime.fromisoformat(s["saved_at"])
+            zeit = ts.strftime("%d.%m.%Y %H:%M")
+        except (ValueError, TypeError):
+            zeit = s["saved_at"]
+        rows += f"""<tr>
+            <td style="padding:6px; text-align:center; font-weight:bold;">{i}</td>
+            <td style="padding:6px;">{s['gruppenname']}</td>
+            <td style="padding:6px; text-align:center;">{s['gruppennummer']}</td>
+            <td style="padding:6px; text-align:center;">{s['phase']}</td>
+            <td style="padding:6px; text-align:center;">{s['zielweite']:.0f} cm</td>
+            <td style="padding:6px;">{zeit}</td>
+        </tr>"""
+
+    html = f"""
+    <div style="padding:12px; border:2px solid {BLUE}; border-radius:8px;
+                background:{LIGHT_BLUE}; margin:10px 0;">
+        <h3 style="margin:0 0 8px 0;">📂 Vorhandene Speicherstände</h3>
+        <table style="border-collapse:collapse; width:100%; background:white; border-radius:4px;">
+            <tr style="background:{BLUE}; color:white;">
+                <th style="padding:8px;">Nr.</th>
+                <th style="padding:8px;">Gruppe</th>
+                <th style="padding:8px;">Nr.</th>
+                <th style="padding:8px;">Phase</th>
+                <th style="padding:8px;">Zielweite</th>
+                <th style="padding:8px;">Gespeichert</th>
+            </tr>
+            {rows}
+        </table>
+    </div>"""
+    display(HTML(html))
 
 
 def zeige_restore_zusammenfassung(projekt: Projekt):
