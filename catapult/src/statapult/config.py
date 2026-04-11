@@ -64,11 +64,6 @@ class CatapultConfig:
 
         # Kalibrierungskoeffizienten aus YAML laden (falls vorhanden)
         calib_data = data.get("calibration", {})
-        factor_coefficients = None
-        if calib_data.get("factor_coefficients"):
-            factor_coefficients = {}
-            for key, vals in calib_data["factor_coefficients"].items():
-                factor_coefficients[key] = (vals["linear"], vals.get("quadratic", 0.0))
 
         physics = CatapultPhysics(
             arm_length_m=cat.get("arm_length_cm", 30.0) / 100.0,
@@ -80,7 +75,6 @@ class CatapultConfig:
             air_density=phys_data.get("air_density", 1.225),
             drag_coefficient=phys_data.get("drag_coefficient", 0.47),
             d_base=calib_data.get("d_base", 150.0),
-            factor_coefficients=factor_coefficients,
         )
 
         noise = NoiseModel(

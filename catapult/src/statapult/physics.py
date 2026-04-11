@@ -27,26 +27,56 @@ from .factors import ALL_FACTORS
 
 
 # ======================================================================
-# Kalibrierungskoeffizienten
+# Kalibrierungskoeffizienten (Additives Modell)
 # ======================================================================
+#
+# d = D_BASE + Σ(a_i · x_i) + Σ(q_i · x_i²) + Σ(b_ij · x_i · x_j)
+#
+# Physikalische Motivation:
+# - Abzugswinkel: mehr Rueckzug = mehr Federenergie = monoton weiter
+# - Stoppwinkel: bestimmt den Abwurfwinkel; es gibt ein Optimum (~45°),
+#   daher starke quadratische Kruemmung
+# - Gummiband-Position: hoeher = staerkere Federkraft, nahezu linear
+# - Becherposition: Hebelarm vs. Traegheitsmoment -- es gibt ein Optimum
+#   (zu kurz: wenig Hebel; zu lang: zu viel Traegheit)
+# - Pin-Hoehe: hoeher = hoehere Abwurfposition, rein linear
+# - Ballgewicht: schwerer = kuerzere Flugbahn, nahezu linear
+# - Wind: Ruecken-/Gegenwind, rein linear
+#
+# Wechselwirkungen entstehen aus physikalischen Kopplungen:
+# - Abzugswinkel × Gummiband: Gesamtenergie = Federkraft × Auslenkung
+# - Stoppwinkel × Becherposition: Abwurfgeometrie koppelt
+# - Becherposition × Ballgewicht: gemeinsames Traegheitsmoment
 
-# Basis-Wurfweite bei Mittelstellung aller Faktoren (cm)
-# Kalibriert fuer ein realistisches Tisch-Statapult (60-300 cm Bereich)
 D_BASE: float = 150.0
 
-# Faktor-Koeffizienten: (linearer_Anteil c, quadratischer_Anteil q)
-# d = D_BASE * prod(1 + c_i * x_i + q_i * x_i^2)
-# x_i: kodierter Faktorwert (-1 bis +1)
-# c_i > 0: hoehere Einstellung -> laengere Distanz
-# q_i < 0: Optimum liegt in der Mitte (Kruemmung)
-FACTOR_COEFFICIENTS: Dict[str, tuple[float, float]] = {
-    "abzugswinkel":       (0.18, 0.00),    # Energie ~ Rueckzugswinkel
-    "stoppwinkel":        (0.13, -0.04),   # Abwurfwinkel, leichte Kruemmung
-    "gummiband_position": (0.16, 0.00),    # Federkraft ~ Position
-    "becherposition":     (0.10, -0.05),   # Hebelarm-Optimum (Kruemmung)
-    "pin_hoehe":          (0.07, 0.00),    # Abwurfhoehe
-    "ballgewicht":        (-0.13, 0.00),   # Schwerer Ball = kuerzer
-    "wind":               (0.05, 0.00),    # Rueckenwind hilft
+# Haupteffekte: cm pro kodierter Einheit [-1, +1]
+MAIN_EFFECTS: Dict[str, float] = {
+    "abzugswinkel":        27.0,    # stark, monoton
+    "stoppwinkel":         20.0,    # stark
+    "gummiband_position":  24.0,    # stark, monoton
+    "becherposition":      14.0,    # mittel
+    "pin_hoehe":           10.0,    # schwach, monoton
+    "ballgewicht":        -18.0,    # mittel, negativ
+    "wind":                 6.0,    # schwach
+}
+
+# Quadratische Effekte (Kruemmung): cm bei x²
+# Nur fuer Faktoren mit physikalischem Optimum
+QUADRATIC_EFFECTS: Dict[str, float] = {
+    "stoppwinkel":         -8.0,    # starkes Optimum (Abwurfwinkel ~45°)
+    "becherposition":      -6.0,    # Optimum (Hebel vs. Traegheit)
+}
+
+# 2-Faktor-Wechselwirkungen: cm bei x_i·x_j
+INTERACTIONS: Dict[tuple[str, str], float] = {
+    ("abzugswinkel", "gummiband_position"):  5.0,   # Energie = Kraft × Weg
+    ("abzugswinkel", "stoppwinkel"):         3.5,   # Energie × Abwurfgeometrie
+    ("stoppwinkel", "gummiband_position"):   3.0,   # Geschwindigkeit × Winkel
+    ("abzugswinkel", "becherposition"):      2.5,   # Energie × Hebelarm
+    ("gummiband_position", "becherposition"):2.0,   # Kraft × Hebelarm
+    ("stoppwinkel", "becherposition"):       1.5,   # Winkel × Position
+    ("becherposition", "ballgewicht"):      -2.0,   # Traegheitsmoment-Kopplung
 }
 
 
@@ -54,8 +84,9 @@ FACTOR_COEFFICIENTS: Dict[str, tuple[float, float]] = {
 class CatapultPhysics:
     """Physikalische Konstanten des Katapults.
 
-    Diese werden fuer die Berechnung der Zwischenwerte (Energie,
-    Geschwindigkeit, Abwurfwinkel) im Verbose-Modus verwendet.
+    Die Zwischenwerte (Energie, Geschwindigkeit) werden fuer den
+    Verbose-Modus berechnet.  Die tatsaechliche Wurfweite kommt
+    aus dem additiven Modell (compute_distance).
     """
 
     arm_length_m: float = 0.30
@@ -67,11 +98,17 @@ class CatapultPhysics:
     air_density: float = 1.225
     drag_coefficient: float = 0.47
     d_base: float = D_BASE
-    factor_coefficients: Dict[str, tuple[float, float]] = None
+    main_effects: Dict[str, float] = None
+    quadratic_effects: Dict[str, float] = None
+    interactions: Dict[tuple[str, str], float] = None
 
     def __post_init__(self):
-        if self.factor_coefficients is None:
-            self.factor_coefficients = dict(FACTOR_COEFFICIENTS)
+        if self.main_effects is None:
+            self.main_effects = dict(MAIN_EFFECTS)
+        if self.quadratic_effects is None:
+            self.quadratic_effects = dict(QUADRATIC_EFFECTS)
+        if self.interactions is None:
+            self.interactions = dict(INTERACTIONS)
 
 
 @dataclass
@@ -112,24 +149,38 @@ def compute_distance(
 ) -> float:
     """Berechnet die deterministische Wurfweite (ohne Rauschen).
 
-    Kalibriertes multiplikatives Modell:
-    d = D_BASE * prod(1 + c_i * x_i + q_i * x_i^2)
+    Additives Modell mit physikalisch motivierten Termen:
+    d = D_BASE + Σ(a_i · x_i) + Σ(q_i · x_i²) + Σ(b_ij · x_i · x_j)
 
-    Jeder Faktor wirkt als unabhaengiger Multiplikator.
-    Wechselwirkungen entstehen natuerlich aus der Multiplikation.
+    Haupteffekte wirken linear, Kruemmung nur bei Faktoren mit
+    physikalischem Optimum (Stoppwinkel, Becherposition).
+    Wechselwirkungen bilden physikalische Kopplungen ab.
     """
     if phys is None:
         phys = CatapultPhysics()
 
-    d = phys.d_base
-    coeffs = phys.factor_coefficients
-
-    for key, (c, q) in coeffs.items():
-        if key not in ALL_FACTORS:
-            continue
+    # Alle Faktoren kodieren
+    coded = {}
+    for key in ALL_FACTORS:
         val = settings.get(key, ALL_FACTORS[key].default)
-        x = _code_factor(key, val)
-        d *= (1.0 + c * x + q * x ** 2)
+        coded[key] = _code_factor(key, val)
+
+    d = phys.d_base
+
+    # Haupteffekte
+    for key, a in phys.main_effects.items():
+        if key in coded:
+            d += a * coded[key]
+
+    # Quadratische Effekte (nur fuer ausgewaehlte Faktoren)
+    for key, q in phys.quadratic_effects.items():
+        if key in coded:
+            d += q * coded[key] ** 2
+
+    # 2-Faktor-Wechselwirkungen
+    for (k1, k2), b in phys.interactions.items():
+        if k1 in coded and k2 in coded:
+            d += b * coded[k1] * coded[k2]
 
     return max(0.0, d)
 
