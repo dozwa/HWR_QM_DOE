@@ -132,18 +132,17 @@ class TestCpkProperties:
     """Tests fuer Process Capability-Eignung."""
 
     def test_cpk_achievable(self):
-        """Mit optimierten Settings und Toleranz ±15 cm sollte Cpk > 1.0 moeglich sein."""
+        """Mit konstanten Settings und Toleranz +/-15 cm sollte Cpk > 1.0 sein."""
         s = Statapult(seed=42)
-        # Gute Settings mit niedrigem Rauschen
         settings = {k: f.default for k, f in ALL_FACTORS.items()}
         distances = [s.shoot(settings).wurfweite_cm for _ in range(50)]
 
         mean = np.mean(distances)
         std = np.std(distances, ddof=1)
         tolerance = 15.0
+        usl = mean + tolerance
+        lsl = mean - tolerance
 
-        cpk_upper = (mean + tolerance - mean) / (3 * std)
-        cpk_lower = (mean - (mean - tolerance)) / (3 * std)
-        cpk = min(cpk_upper, cpk_lower)
+        cpk = min((usl - mean) / (3 * std), (mean - lsl) / (3 * std))
 
         assert cpk > 1.0, f"Cpk {cpk:.2f} should be achievable"

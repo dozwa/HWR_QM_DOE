@@ -12,7 +12,6 @@ physics:
   gravity: 9.81
   air_density: 1.225
   drag_coefficient: 0.47   # Standard Kugel-Cd
-  enable_drag: false
 
 ball_types:
   pingpong:

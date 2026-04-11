@@ -6,7 +6,6 @@ mit Fallback auf eingebaute Defaults.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -35,7 +34,6 @@ class CatapultConfig:
 
     physics: CatapultPhysics = field(default_factory=CatapultPhysics)
     noise: NoiseModel = field(default_factory=NoiseModel)
-    enable_drag: bool = False
     ball_types: Dict[str, BallType] = field(default_factory=dict)
 
     @classmethod
@@ -99,6 +97,5 @@ class CatapultConfig:
         return cls(
             physics=physics,
             noise=noise,
-            enable_drag=phys_data.get("enable_drag", False),
             ball_types=ball_types,
         )

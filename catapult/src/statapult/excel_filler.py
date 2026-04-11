@@ -91,9 +91,9 @@ def fill_msa(
         data_row = header_row + 1
         row = data_row
         while ws_repr.cell(row=row, column=1).value is not None:
-            # Pro Wurf: einmal schiessen, dann jede Person misst
+            # Pro Wurf: einmal schiessen -> wahre Distanz als Basis
             shot = katapult.shoot(settings, noise_level=noise_level)
-            true_val = shot.wurfweite_cm
+            true_val = shot.true_distance_cm
             for p in range(num_personen):
                 operator_id = f"Person {p + 1}"
                 # Jede Person misst mit eigenem Bias + Messrauschen

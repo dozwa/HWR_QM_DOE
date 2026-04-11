@@ -1418,6 +1418,10 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
 
     df = modell._daten.copy()
     faktor_namen = modell._faktor_namen
+    # Metadaten vom Original-Modell sichern
+    _orig_faktor_details = getattr(modell, "_faktor_details", [])
+    _orig_rename_map = getattr(modell, "_rename_map", {})
+    _orig_quad_namen = getattr(modell, "_quad_namen", [])
     log = []
 
     # Aktuelle Terme sammeln
@@ -1477,7 +1481,9 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         formel = "Y ~ " + " + ".join(current_terms)
         modell = ols(formel, data=df).fit()
         modell._faktor_namen = faktor_namen
-        modell._faktor_details = getattr(modell, "_faktor_details", [])
+        modell._faktor_details = _orig_faktor_details
+        modell._rename_map = _orig_rename_map
+        modell._quad_namen = _orig_quad_namen
         modell._daten = df
 
     if not log:
@@ -1980,7 +1986,13 @@ def _transmitted_variance(x_coded, modell, sigma_setting=0.1):
 
     total = 0.0
     for k in range(len(fn)):
+        # dy/dx_k = beta_k + 2*beta_{k_sq}*x_k + sum(beta_{k:j} * x_j)
         dy_dxk = get_beta(fn[k])
+        # Quadratischer Term: dy/dx_k += 2 * beta_{k_sq} * x_k
+        sq_name = f"{fn[k]}_sq"
+        if sq_name in params.index:
+            dy_dxk += 2.0 * get_beta(sq_name) * x_coded[k]
+        # Interaktionsterme
         for j in range(len(fn)):
             if j == k:
                 continue

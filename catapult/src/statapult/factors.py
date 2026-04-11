@@ -6,8 +6,8 @@ Das Format ist kompatibel mit helper.py ``generiere_versuchsplan()``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Dict, List
+from dataclasses import dataclass
+from typing import Dict
 
 
 @dataclass(frozen=True)

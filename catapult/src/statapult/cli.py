@@ -50,7 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shoot_p.add_argument("--verbose", "-v", action="store_true", help="Ausfuehrliche Ausgabe")
     shoot_p.add_argument("--config", type=str, default=None, help="YAML-Konfigurationsdatei")
-    shoot_p.add_argument("--drag", action="store_true", help="Luftwiderstand aktivieren")
 
     # --- batch ---
     batch_p = subparsers.add_parser("batch", help="Batch-Modus aus CSV-Datei")
@@ -59,7 +58,6 @@ def build_parser() -> argparse.ArgumentParser:
     batch_p.add_argument("--seed", type=int, default=None, help="Zufalls-Seed")
     batch_p.add_argument("--noise-level", type=float, default=1.0, help="Rausch-Multiplikator")
     batch_p.add_argument("--config", type=str, default=None, help="YAML-Konfigurationsdatei")
-    batch_p.add_argument("--drag", action="store_true", help="Luftwiderstand aktivieren")
 
     # --- msa ---
     msa_p = subparsers.add_parser("msa", help="MSA-Daten generieren")
@@ -134,10 +132,6 @@ def _load_config(args: argparse.Namespace) -> CatapultConfig:
         config = CatapultConfig.from_yaml(config_path)
     else:
         config = CatapultConfig.default()
-
-    if getattr(args, "drag", False):
-        config.enable_drag = True
-
     return config
 
 
@@ -303,7 +297,7 @@ def cmd_fill(args: argparse.Namespace) -> None:
             )
             print(f"Konfirmations-Vorlage befuellt: {result}")
         else:
-            print(f"Fehler: Konnte Vorlagen-Typ nicht erkennen. Sheets: {wb.sheetnames}", file=sys.stderr)
+            print(f"Fehler: Konnte Vorlagen-Typ nicht erkennen. Sheets: {sheets}", file=sys.stderr)
             sys.exit(1)
 
 

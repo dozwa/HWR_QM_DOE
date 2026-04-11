@@ -135,12 +135,7 @@ class TrajectoryResult:
 
 def _code_factor(key: str, value: float) -> float:
     """Kodiert einen Faktorwert in [-1, +1]."""
-    f = ALL_FACTORS[key]
-    center = (f.high + f.low) / 2.0
-    half_range = (f.high - f.low) / 2.0
-    if half_range == 0:
-        return 0.0
-    return (value - center) / half_range
+    return ALL_FACTORS[key].coded(value)
 
 
 def compute_distance(
@@ -243,10 +238,8 @@ def compute_launch_info(
     if launch_angle_deg > 0 and launch_angle_deg < 90:
         # Effektive Geschwindigkeit aus Wurfweite
         sin2a = math.sin(2.0 * launch_angle_rad)
-        if sin2a > 0:
-            v_eff = math.sqrt(
-                distance_m * g / (sin2a + 0.01)
-            )
+        if sin2a > 1e-6:
+            v_eff = math.sqrt(distance_m * g / sin2a)
         else:
             v_eff = v_ball
     else:
@@ -300,8 +293,6 @@ def simulate_shot(
     pin_hoehe: float,
     ballgewicht: float = 10.0,
     wind: float = 0.0,
-    enable_drag: bool = False,
-    ball_radius_cm: float = 2.0,
     phys: Optional[CatapultPhysics] = None,
 ) -> tuple[float, LaunchResult, TrajectoryResult]:
     """Fuehrt einen kompletten Schuss durch.

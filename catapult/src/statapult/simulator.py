@@ -107,7 +107,6 @@ class Statapult:
             pin_hoehe=validated["pin_hoehe"],
             ballgewicht=validated["ballgewicht"],
             wind=validated["wind"],
-            enable_drag=self.config.enable_drag,
             phys=self.config.physics,
         )
 
