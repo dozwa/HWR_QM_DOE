@@ -156,30 +156,48 @@ def fill_doe(
         if h and ("ergebnis" in str(h).lower() or "weite" in str(h).lower()):
             result_col = i + 1
 
-    # Faktor-Spalten identifizieren: Spalten mit Einheit in Klammern (Original-Werte)
-    factor_cols = {}
+    # Faktor-Spalten identifizieren
+    # Prioritaet 1: Original-Werte "Name (Einheit)" (nicht "kodiert")
+    # Prioritaet 2: Kodierte Werte "Name (kodiert)" -> werden umgerechnet
+    factor_cols = {}       # key -> (col_index, is_coded)
+    coded_cols = {}        # key -> col_index (kodierte Spalten als Fallback)
+
     for i, h in enumerate(headers):
         if h is None:
             continue
         h_str = str(h)
-        # Suche nach "Name (Einheit)" Pattern (nicht "kodiert")
-        if "(" in h_str and ")" in h_str and "kodiert" not in h_str.lower():
-            # Faktor-Name extrahieren
-            name_part = h_str.split("(")[0].strip()
-            # Mapping auf Simulator-Keys
-            for key, factor in ALL_FACTORS.items():
-                if factor.name.lower() in name_part.lower() or key in name_part.lower().replace("-", "_").replace(" ", "_"):
-                    factor_cols[key] = i + 1  # 1-indexed
-                    break
+        if "(" not in h_str or ")" not in h_str:
+            continue
+
+        name_part = h_str.split("(")[0].strip()
+        is_coded = "kodiert" in h_str.lower() or "coded" in h_str.lower()
+
+        for key, factor in ALL_FACTORS.items():
+            if factor.name.lower() in name_part.lower() or key in name_part.lower().replace("-", "_").replace(" ", "_"):
+                if is_coded:
+                    coded_cols[key] = i + 1
+                else:
+                    factor_cols[key] = (i + 1, False)
+                break
+
+    # Fallback: Wenn kein Original-Wert vorhanden, kodierte Spalte nutzen
+    for key, col_idx in coded_cols.items():
+        if key not in factor_cols:
+            factor_cols[key] = (col_idx, True)
 
     # Datenzeilen verarbeiten
     row = 2
     while ws.cell(row=row, column=1).value is not None:
         settings = {}
-        for key, col_idx in factor_cols.items():
+        for key, (col_idx, is_coded) in factor_cols.items():
             val = ws.cell(row=row, column=col_idx).value
             if val is not None:
-                settings[key] = float(val)
+                val = float(val)
+                if is_coded:
+                    # Kodiert (-1/0/+1) in natuerlichen Wert umrechnen
+                    settings[key] = ALL_FACTORS[key].natural(val)
+                else:
+                    settings[key] = val
 
         result = katapult.shoot(settings, noise_level=noise_level)
         ws.cell(row=row, column=result_col, value=round(result.wurfweite_cm, 1))
