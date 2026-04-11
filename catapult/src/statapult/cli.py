@@ -88,6 +88,20 @@ def build_parser() -> argparse.ArgumentParser:
     # --- info ---
     subparsers.add_parser("info", help="Faktor-Uebersicht anzeigen")
 
+    # --- fill ---
+    fill_p = subparsers.add_parser(
+        "fill",
+        help="Excel-Vorlagen des Notebooks mit simulierten Daten befuellen",
+    )
+    fill_p.add_argument(
+        "file", type=str,
+        help="Pfad zur Excel-Vorlage (MSA, DoE oder Konfirmation)",
+    )
+    fill_p.add_argument("-o", "--output", default=None, help="Ausgabe-Pfad (sonst ueberschreibt Eingabe)")
+    fill_p.add_argument("--seed", type=int, default=None, help="Zufalls-Seed")
+    fill_p.add_argument("--noise-level", type=float, default=1.0, help="Rausch-Multiplikator")
+    _add_factor_args(fill_p)
+
     return parser
 
 
@@ -232,6 +246,67 @@ def cmd_info(_args: argparse.Namespace) -> None:
     print(factors_info())
 
 
+def cmd_fill(args: argparse.Namespace) -> None:
+    from .excel_filler import fill_doe, fill_konfirmation, fill_msa
+
+    filepath = args.file
+    if not Path(filepath).exists():
+        print(f"Fehler: Datei nicht gefunden: {filepath}", file=sys.stderr)
+        sys.exit(1)
+
+    settings = _get_settings(args) or None
+    output = args.output
+
+    # Auto-detect Vorlage anhand Dateiname oder Inhalt
+    name_lower = Path(filepath).name.lower()
+    if "msa" in name_lower:
+        result = fill_msa(
+            filepath, output_path=output, settings=settings,
+            seed=args.seed, noise_level=args.noise_level,
+        )
+        print(f"MSA-Vorlage befuellt: {result}")
+    elif "doe" in name_lower or "versuch" in name_lower:
+        result = fill_doe(
+            filepath, output_path=output,
+            seed=args.seed, noise_level=args.noise_level,
+        )
+        print(f"DoE-Vorlage befuellt: {result}")
+    elif "konfirm" in name_lower:
+        result = fill_konfirmation(
+            filepath, output_path=output, settings=settings,
+            seed=args.seed, noise_level=args.noise_level,
+        )
+        print(f"Konfirmations-Vorlage befuellt: {result}")
+    else:
+        # Versuche Inhalt zu erkennen
+        from openpyxl import load_workbook
+        wb = load_workbook(filepath, read_only=True)
+        sheets = [s.lower() for s in wb.sheetnames]
+        wb.close()
+
+        if "type-1" in sheets or "reproduzierbarkeit" in sheets:
+            result = fill_msa(
+                filepath, output_path=output, settings=settings,
+                seed=args.seed, noise_level=args.noise_level,
+            )
+            print(f"MSA-Vorlage befuellt: {result}")
+        elif "versuchsergebnisse" in sheets:
+            result = fill_doe(
+                filepath, output_path=output,
+                seed=args.seed, noise_level=args.noise_level,
+            )
+            print(f"DoE-Vorlage befuellt: {result}")
+        elif "konfirmation" in sheets:
+            result = fill_konfirmation(
+                filepath, output_path=output, settings=settings,
+                seed=args.seed, noise_level=args.noise_level,
+            )
+            print(f"Konfirmations-Vorlage befuellt: {result}")
+        else:
+            print(f"Fehler: Konnte Vorlagen-Typ nicht erkennen. Sheets: {wb.sheetnames}", file=sys.stderr)
+            sys.exit(1)
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -246,5 +321,6 @@ def main(argv: Optional[List[str]] = None) -> None:
         "msa": cmd_msa,
         "control": cmd_control,
         "info": cmd_info,
+        "fill": cmd_fill,
     }
     commands[args.command](args)

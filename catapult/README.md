@@ -29,6 +29,9 @@ statapult shoot --repeat 10 --seed 42
 
 # Faktor-Uebersicht
 statapult info
+
+# Excel-Vorlage des Notebooks befuellen
+statapult fill DoE_Versuchsergebnisse.xlsx --seed 42
 ```
 
 ## Faktoren
@@ -92,6 +95,29 @@ statapult msa --operators 3 --measurements-per-operator 10 \
 ```
 
 Jeder Operator bekommt einen eigenen systematischen Mess-Bias.
+
+### `fill` – Excel-Vorlagen des Notebooks befuellen
+
+Befuellt die Excel-Dateien, die das DMAIC-Notebook erzeugt, mit simulierten Daten.
+Erkennt automatisch den Vorlagentyp (MSA, DoE, Konfirmation).
+
+```bash
+# MSA-Vorlage befuellen (Type-1 + Reproduzierbarkeit)
+statapult fill MSA_Messung_Template.xlsx --seed 42
+
+# DoE-Versuchsplan ausfuehren (liest Faktoren, schreibt Ergebnisse)
+statapult fill DoE_Versuchsergebnisse.xlsx --seed 42
+
+# Konfirmationswuerfe simulieren
+statapult fill Konfirmation.xlsx --seed 42
+
+# Ausgabe in neue Datei (Original bleibt erhalten)
+statapult fill DoE_Versuchsergebnisse.xlsx -o DoE_filled.xlsx --seed 42
+```
+
+Der `fill`-Befehl liest den Versuchsplan aus der Excel-Datei, fuehrt fuer jede
+Zeile einen simulierten Schuss durch und traegt die Ergebnisse direkt ein.
+Die befuellte Datei kann dann im Notebook hochgeladen werden.
 
 ### `control` – Regelkarten-Daten generieren
 
