@@ -74,7 +74,7 @@ class CatapultConfig:
             gravity=phys_data.get("gravity", 9.81),
             air_density=phys_data.get("air_density", 1.225),
             drag_coefficient=phys_data.get("drag_coefficient", 0.47),
-            d_base=calib_data.get("d_base", 150.0),
+            d_base=calib_data.get("d_base", 340.0),
         )
 
         noise = NoiseModel(

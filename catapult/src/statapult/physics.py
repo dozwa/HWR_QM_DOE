@@ -48,35 +48,35 @@ from .factors import ALL_FACTORS
 # - Stoppwinkel × Becherposition: Abwurfgeometrie koppelt
 # - Becherposition × Ballgewicht: gemeinsames Traegheitsmoment
 
-D_BASE: float = 150.0
+D_BASE: float = 340.0
 
 # Haupteffekte: cm pro kodierter Einheit [-1, +1]
 MAIN_EFFECTS: Dict[str, float] = {
-    "abzugswinkel":        27.0,    # stark, monoton
-    "stoppwinkel":         20.0,    # stark
-    "gummiband_position":  24.0,    # stark, monoton
-    "becherposition":      14.0,    # mittel
-    "pin_hoehe":           10.0,    # schwach, monoton
-    "ballgewicht":        -18.0,    # mittel, negativ
-    "wind":                 6.0,    # schwach
+    "abzugswinkel":        57.0,    # stark, monoton
+    "stoppwinkel":         42.0,    # stark
+    "gummiband_position":  50.0,    # stark, monoton
+    "becherposition":      29.0,    # mittel
+    "pin_hoehe":           21.0,    # schwach, monoton
+    "ballgewicht":        -38.0,    # mittel, negativ
+    "wind":                13.0,    # schwach
 }
 
 # Quadratische Effekte (Kruemmung): cm bei x²
 # Nur fuer Faktoren mit physikalischem Optimum
 QUADRATIC_EFFECTS: Dict[str, float] = {
-    "stoppwinkel":         -8.0,    # starkes Optimum (Abwurfwinkel ~45°)
-    "becherposition":      -6.0,    # Optimum (Hebel vs. Traegheit)
+    "stoppwinkel":        -17.0,    # starkes Optimum (Abwurfwinkel ~45°)
+    "becherposition":     -13.0,    # Optimum (Hebel vs. Traegheit)
 }
 
 # 2-Faktor-Wechselwirkungen: cm bei x_i·x_j
 INTERACTIONS: Dict[tuple[str, str], float] = {
-    ("abzugswinkel", "gummiband_position"):  5.0,   # Energie = Kraft × Weg
-    ("abzugswinkel", "stoppwinkel"):         3.5,   # Energie × Abwurfgeometrie
-    ("stoppwinkel", "gummiband_position"):   3.0,   # Geschwindigkeit × Winkel
-    ("abzugswinkel", "becherposition"):      2.5,   # Energie × Hebelarm
-    ("gummiband_position", "becherposition"):2.0,   # Kraft × Hebelarm
-    ("stoppwinkel", "becherposition"):       1.5,   # Winkel × Position
-    ("becherposition", "ballgewicht"):      -2.0,   # Traegheitsmoment-Kopplung
+    ("abzugswinkel", "gummiband_position"): 10.0,   # Energie = Kraft × Weg
+    ("abzugswinkel", "stoppwinkel"):         7.0,   # Energie × Abwurfgeometrie
+    ("stoppwinkel", "gummiband_position"):   6.0,   # Geschwindigkeit × Winkel
+    ("abzugswinkel", "becherposition"):      5.0,   # Energie × Hebelarm
+    ("gummiband_position", "becherposition"):4.0,   # Kraft × Hebelarm
+    ("stoppwinkel", "becherposition"):       3.0,   # Winkel × Position
+    ("becherposition", "ballgewicht"):      -4.0,   # Traegheitsmoment-Kopplung
 }
 
 

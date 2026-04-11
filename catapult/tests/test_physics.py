@@ -17,22 +17,24 @@ class TestComputeDistance:
     """Tests fuer das kalibrierte Distanzmodell."""
 
     def test_center_point_range(self):
-        """Center-point sollte im Bereich 140-190 cm liegen."""
+        """Center-point sollte im Bereich 300-400 cm liegen."""
         defaults = {k: f.default for k, f in ALL_FACTORS.items()}
         d = compute_distance(defaults)
-        assert 140 <= d <= 190, f"Center distance {d:.1f} cm out of range"
+        assert 300 <= d <= 400, f"Center distance {d:.1f} cm out of range"
 
-    def test_all_low_above_minimum(self):
-        """Alle Faktoren auf Low sollte > 50 cm geben."""
+    def test_min_distance_reachable(self):
+        """Minimale Distanz (alle auf 'kurz') sollte nahe 100 cm sein."""
         settings = {k: f.low for k, f in ALL_FACTORS.items()}
+        settings["ballgewicht"] = ALL_FACTORS["ballgewicht"].high  # schwer = kurz
         d = compute_distance(settings)
-        assert d > 50, f"All-low distance {d:.1f} cm too short"
+        assert 50 < d < 150, f"Min distance {d:.1f} cm out of range"
 
-    def test_all_high_below_maximum(self):
-        """Alle Faktoren auf High sollte < 400 cm geben."""
+    def test_max_distance_reachable(self):
+        """Maximale Distanz (alle auf 'weit') sollte nahe 600 cm sein."""
         settings = {k: f.high for k, f in ALL_FACTORS.items()}
+        settings["ballgewicht"] = ALL_FACTORS["ballgewicht"].low  # leicht = weit
         d = compute_distance(settings)
-        assert d < 400, f"All-high distance {d:.1f} cm too long"
+        assert 500 < d < 700, f"Max distance {d:.1f} cm out of range"
 
     def test_abzugswinkel_positive_effect(self):
         """Hoeherer Abzugswinkel = laengere Distanz."""

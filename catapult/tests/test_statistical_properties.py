@@ -47,8 +47,8 @@ class TestDOEProperties:
         """Distanzen sollten im Bereich 100-600 cm liegen."""
         results, _ = doe_results
         distances = [r["distance"] for r in results]
-        assert min(distances) > 40, f"Min distance {min(distances):.1f} too low"
-        assert max(distances) < 400, f"Max distance {max(distances):.1f} too high"
+        assert min(distances) > 100, f"Min distance {min(distances):.1f} too low"
+        assert max(distances) < 700, f"Max distance {max(distances):.1f} too high"
 
     def test_main_effects_detectable(self, doe_results):
         """Mindestens 3 Haupteffekte sollten > 15 cm sein."""
@@ -74,7 +74,7 @@ class TestDOEProperties:
             high = [r["distance"] for r in results if r[xi_key] == 1]
             low = [r["distance"] for r in results if r[xi_key] == -1]
             effect = abs(np.mean(high) - np.mean(low))
-            assert effect < 120, f"Factor {factors[i]} effect {effect:.1f} too large"
+            assert effect < 250, f"Factor {factors[i]} effect {effect:.1f} too large"
 
 
 class TestMSAProperties:
