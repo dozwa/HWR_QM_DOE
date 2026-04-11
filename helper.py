@@ -1306,29 +1306,27 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     hat_centerpoints = False
     if len(df) > 0:
         coded_abs = df[faktor_namen].abs()
-        # Zeilen bei denen ALLE Faktoren |x| < 0.5 sind → Centerpoints
         cp_mask = (coded_abs < 0.5).all(axis=1)
         n_centerpoints = cp_mask.sum()
-        hat_centerpoints = n_centerpoints >= 2  # mindestens 2 für Schätzung
+        hat_centerpoints = n_centerpoints >= 2
 
-    # --- Entscheidung: quadratische Terme? ---
-    quad_aktiv = False
+    # --- Entscheidung: quadratische Terme testen? ---
+    teste_quad = False
     if mit_quadratischen_termen == "auto":
-        quad_aktiv = hat_centerpoints  # automatisch wenn Centerpoints vorhanden
+        teste_quad = hat_centerpoints
     elif mit_quadratischen_termen is True:
         if not hat_centerpoints:
-            print("⚠️ Quadratische Terme angefordert, aber keine Centerpoints gefunden. "
-                  "Die x²-Koeffizienten sind ohne Centerpoints nicht zuverlässig schätzbar.")
-        quad_aktiv = True
-    # else: False → quad_aktiv bleibt False
+            print("⚠️ Quadratische Terme angefordert, aber keine Centerpoints "
+                  "gefunden. x²-Koeffizienten sind ohne Centerpoints nicht "
+                  "zuverlässig schätzbar.")
+        teste_quad = True
 
-    # --- Quadratische Spalten erzeugen ---
-    quad_namen = []
-    if quad_aktiv:
-        for name in faktor_namen:
-            sq_name = f"{name}_sq"
-            df[sq_name] = df[name] ** 2
-            quad_namen.append(sq_name)
+    # --- Quadratische Spalten für ALLE Faktoren vorbereiten ---
+    alle_quad = []
+    for name in faktor_namen:
+        sq_name = f"{name}_sq"
+        df[sq_name] = df[name] ** 2
+        alle_quad.append(sq_name)
 
     # --- Formel aufbauen ---
     def _build_formula(fn, quad, mit_2fi, mit_3fi):
@@ -1348,32 +1346,54 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
                 terme.append(" + ".join(dreier))
         return "Y ~ " + " + ".join(terme)
 
-    # --- Modell fitten (ggf. mit automatischer Auswahl) ---
-    if mit_quadratischen_termen == "auto" and hat_centerpoints:
-        # Beide Modelle fitten und vergleichen
-        formel_lin = _build_formula(faktor_namen, [], mit_interaktionen,
-                                    mit_drei_faktor_interaktionen)
-        formel_quad = _build_formula(faktor_namen, quad_namen, mit_interaktionen,
-                                     mit_drei_faktor_interaktionen)
-        model_lin = ols(formel_lin, data=df).fit()
-        model_quad = ols(formel_quad, data=df).fit()
+    # --- Modell fitten ---
+    # Schritt 1: Lineares Basismodell (immer)
+    formel_lin = _build_formula(faktor_namen, [], mit_interaktionen,
+                                mit_drei_faktor_interaktionen)
+    model_lin = ols(formel_lin, data=df).fit()
 
-        delta_r2 = model_quad.rsquared_adj - model_lin.rsquared_adj
-        if delta_r2 > 0.002:
-            model = model_quad
-            print(f"ℹ️ Quadratisches Modell gewählt (R²_adj: {model_quad.rsquared_adj:.4f} "
-                  f"vs. linear {model_lin.rsquared_adj:.4f}, "
-                  f"Δ = {delta_r2:+.4f})")
+    # Schritt 2: Per-Faktor quadratische Terme testen
+    quad_namen = []
+    if teste_quad:
+        # Volles quadratisches Modell fitten
+        formel_voll = _build_formula(faktor_namen, alle_quad, mit_interaktionen,
+                                     mit_drei_faktor_interaktionen)
+        model_voll = ols(formel_voll, data=df).fit()
+
+        # Jeden x²-Term einzeln bewerten: behalten wenn p < 0.10
+        alpha_quad = 0.10
+        behalten = []
+        verworfen = []
+        for sq_name in alle_quad:
+            if sq_name in model_voll.pvalues:
+                p = model_voll.pvalues[sq_name]
+                if p < alpha_quad:
+                    behalten.append(sq_name)
+                else:
+                    verworfen.append(sq_name)
+
+        if behalten:
+            quad_namen = behalten
+            # Finales Modell nur mit signifikanten x²-Termen
+            formel_final = _build_formula(faktor_namen, quad_namen,
+                                          mit_interaktionen,
+                                          mit_drei_faktor_interaktionen)
+            model = ols(formel_final, data=df).fit()
+            # Faktor-Namen aus den sq-Namen ableiten (z.B. "X_sq" → "X")
+            namen_kurz = [s.replace("_sq", "") for s in behalten]
+            print(f"ℹ️ Krümmung erkannt bei: {', '.join(namen_kurz)} "
+                  f"(R²_adj: {model.rsquared_adj:.4f} "
+                  f"vs. linear {model_lin.rsquared_adj:.4f})")
+            if verworfen:
+                namen_verw = [s.replace("_sq", "") for s in verworfen]
+                print(f"   Kein x²-Term nötig für: {', '.join(namen_verw)}")
         else:
             model = model_lin
-            quad_namen = []
-            print(f"ℹ️ Lineares Modell ausreichend (R²_adj: {model_lin.rsquared_adj:.4f} "
-                  f"vs. quadratisch {model_quad.rsquared_adj:.4f}, "
-                  f"Δ = {delta_r2:+.4f})")
+            if mit_quadratischen_termen == "auto":
+                print(f"ℹ️ Kein Faktor zeigt signifikante Krümmung — "
+                      f"lineares Modell beibehalten (R²_adj: {model_lin.rsquared_adj:.4f})")
     else:
-        formel = _build_formula(faktor_namen, quad_namen, mit_interaktionen,
-                                mit_drei_faktor_interaktionen)
-        model = ols(formel, data=df).fit()
+        model = model_lin
 
     # Metadaten anhängen
     model._faktor_namen = faktor_namen
