@@ -1217,20 +1217,23 @@ def _parse_faktoren_aus_excel(daten: pd.DataFrame) -> List[Dict]:
 def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
                  mit_interaktionen: bool = True,
                  mit_drei_faktor_interaktionen: bool = False,
-                 mit_quadratischen_termen: bool = False) -> Any:
+                 mit_quadratischen_termen: str = "auto") -> Any:
     """
     Fittet ein OLS-Regressionsmodell.
 
     Standard (2FI): ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
-    RSM (mit_quadratischen_termen=True): ŷ = β₀ + Σβᵢxᵢ + Σβᵢᵢxᵢ² + Σβᵢⱼxᵢxⱼ + ε
+    RSM (mit x²):  ŷ = β₀ + Σβᵢxᵢ + Σβᵢᵢxᵢ² + Σβᵢⱼxᵢxⱼ + ε
 
     daten: DataFrame mit kodierten Faktorspalten + 'Ergebnis' Spalte
-    faktoren: Liste der Faktor-Dicts (werden automatisch aus Excel erkannt wenn leer)
+    faktoren: Liste der Faktor-Dicts
     mit_interaktionen: 2-Faktor-Interaktionen einbeziehen (Standard: True)
-    mit_drei_faktor_interaktionen: 3-Faktor-Interaktionen einbeziehen (Standard: False).
-        Empfohlen bei ≥4 Faktoren mit 2^k-Design (genug Freiheitsgrade).
-    mit_quadratischen_termen: Quadratische Terme xᵢ² einbeziehen (Standard: False).
-        Empfohlen bei ≥4 Faktoren. Erfordert Centerpoints im Versuchsplan.
+    mit_drei_faktor_interaktionen: 3-Faktor-Interaktionen einbeziehen
+    mit_quadratischen_termen: Quadratische Terme xᵢ² einbeziehen.
+        - "auto" (Standard): Prüft ob Centerpoints vorhanden sind. Wenn ja,
+          fittet beide Modelle (linear + quadratisch) und wählt das bessere
+          anhand R²_adj. Wenn keine Centerpoints: nur lineares Modell.
+        - True: Erzwingt quadratische Terme (Warnung wenn keine Centerpoints)
+        - False: Kein quadratisches Modell
     """
     from statsmodels.formula.api import ols
 
@@ -1298,37 +1301,79 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     # NaN-Zeilen entfernen
     df = df.dropna(subset=["Y"] + faktor_namen)
 
-    # Quadratische Spalten erzeugen (fuer RSM)
+    # --- Centerpoint-Erkennung ---
+    # Centerpoints haben kodierte Werte nahe 0 (nicht ±1)
+    hat_centerpoints = False
+    if len(df) > 0:
+        coded_abs = df[faktor_namen].abs()
+        # Zeilen bei denen ALLE Faktoren |x| < 0.5 sind → Centerpoints
+        cp_mask = (coded_abs < 0.5).all(axis=1)
+        n_centerpoints = cp_mask.sum()
+        hat_centerpoints = n_centerpoints >= 2  # mindestens 2 für Schätzung
+
+    # --- Entscheidung: quadratische Terme? ---
+    quad_aktiv = False
+    if mit_quadratischen_termen == "auto":
+        quad_aktiv = hat_centerpoints  # automatisch wenn Centerpoints vorhanden
+    elif mit_quadratischen_termen is True:
+        if not hat_centerpoints:
+            print("⚠️ Quadratische Terme angefordert, aber keine Centerpoints gefunden. "
+                  "Die x²-Koeffizienten sind ohne Centerpoints nicht zuverlässig schätzbar.")
+        quad_aktiv = True
+    # else: False → quad_aktiv bleibt False
+
+    # --- Quadratische Spalten erzeugen ---
     quad_namen = []
-    if mit_quadratischen_termen:
+    if quad_aktiv:
         for name in faktor_namen:
             sq_name = f"{name}_sq"
             df[sq_name] = df[name] ** 2
             quad_namen.append(sq_name)
 
-    # Formel aufbauen
-    haupteffekte = " + ".join(faktor_namen)
-    terme = [haupteffekte]
-    if quad_namen:
-        terme.append(" + ".join(quad_namen))
-    if mit_interaktionen:
-        zweier = []
-        for i in range(len(faktor_namen)):
-            for j in range(i + 1, len(faktor_namen)):
-                zweier.append(f"{faktor_namen[i]}:{faktor_namen[j]}")
-        if zweier:
-            terme.append(" + ".join(zweier))
-    if mit_drei_faktor_interaktionen and len(faktor_namen) >= 3:
-        dreier = []
-        for i in range(len(faktor_namen)):
-            for j in range(i + 1, len(faktor_namen)):
-                for k_ in range(j + 1, len(faktor_namen)):
-                    dreier.append(f"{faktor_namen[i]}:{faktor_namen[j]}:{faktor_namen[k_]}")
-        if dreier:
-            terme.append(" + ".join(dreier))
-    formel = "Y ~ " + " + ".join(terme)
+    # --- Formel aufbauen ---
+    def _build_formula(fn, quad, mit_2fi, mit_3fi):
+        terme = [" + ".join(fn)]
+        if quad:
+            terme.append(" + ".join(quad))
+        if mit_2fi:
+            zweier = [f"{fn[i]}:{fn[j]}"
+                      for i in range(len(fn)) for j in range(i + 1, len(fn))]
+            if zweier:
+                terme.append(" + ".join(zweier))
+        if mit_3fi and len(fn) >= 3:
+            dreier = [f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                      for i in range(len(fn)) for j in range(i + 1, len(fn))
+                      for k_ in range(j + 1, len(fn))]
+            if dreier:
+                terme.append(" + ".join(dreier))
+        return "Y ~ " + " + ".join(terme)
 
-    model = ols(formel, data=df).fit()
+    # --- Modell fitten (ggf. mit automatischer Auswahl) ---
+    if mit_quadratischen_termen == "auto" and hat_centerpoints:
+        # Beide Modelle fitten und vergleichen
+        formel_lin = _build_formula(faktor_namen, [], mit_interaktionen,
+                                    mit_drei_faktor_interaktionen)
+        formel_quad = _build_formula(faktor_namen, quad_namen, mit_interaktionen,
+                                     mit_drei_faktor_interaktionen)
+        model_lin = ols(formel_lin, data=df).fit()
+        model_quad = ols(formel_quad, data=df).fit()
+
+        delta_r2 = model_quad.rsquared_adj - model_lin.rsquared_adj
+        if delta_r2 > 0.002:
+            model = model_quad
+            print(f"ℹ️ Quadratisches Modell gewählt (R²_adj: {model_quad.rsquared_adj:.4f} "
+                  f"vs. linear {model_lin.rsquared_adj:.4f}, "
+                  f"Δ = {delta_r2:+.4f})")
+        else:
+            model = model_lin
+            quad_namen = []
+            print(f"ℹ️ Lineares Modell ausreichend (R²_adj: {model_lin.rsquared_adj:.4f} "
+                  f"vs. quadratisch {model_quad.rsquared_adj:.4f}, "
+                  f"Δ = {delta_r2:+.4f})")
+    else:
+        formel = _build_formula(faktor_namen, quad_namen, mit_interaktionen,
+                                mit_drei_faktor_interaktionen)
+        model = ols(formel, data=df).fit()
 
     # Metadaten anhängen
     model._faktor_namen = faktor_namen
