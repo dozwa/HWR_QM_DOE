@@ -46,7 +46,20 @@ statapult fill DoE_Versuchsergebnisse.xlsx --seed 42
 | `--ballgewicht` | 5–30 | g | Masse des Balls |
 | `--wind` | -2 bis 2 | m/s | Windgeschwindigkeit (positiv = Rueckenwind) |
 
-Typischer Wurfweiten-Bereich: **60–300 cm**.
+Erreichbarer Wurfweiten-Bereich: **100–600 cm** (abhaengig von Faktorkombination).
+
+## Physik-Modell
+
+Additives Modell mit physikalisch motivierten Termen:
+
+```
+d = D_BASE + Σ(aᵢ·xᵢ) + Σ(qᵢ·xᵢ²) + Σ(bᵢⱼ·xᵢ·xⱼ) + Rauschen
+```
+
+- **Haupteffekte** (linear): Jeder Faktor hat einen kalibrierten Effekt auf die Wurfweite
+- **Kruemmung** (quadratisch): Nur bei Stoppwinkel (optimaler Abwurfwinkel) und Becherposition (Hebelarm vs. Traegheit)
+- **Wechselwirkungen**: Physikalische Kopplungen (z.B. Abzugswinkel x Gummiband = Energie)
+- **Rauschen**: Mehrstufig (Messung, Setup, Gummiband, Release, Wind-Turbulenz)
 
 ## Befehle
 
@@ -99,7 +112,8 @@ Jeder Operator bekommt einen eigenen systematischen Mess-Bias.
 ### `fill` – Excel-Vorlagen des Notebooks befuellen
 
 Befuellt die Excel-Dateien, die das DMAIC-Notebook erzeugt, mit simulierten Daten.
-Erkennt automatisch den Vorlagentyp (MSA, DoE, Konfirmation).
+Erkennt automatisch den Vorlagentyp (MSA, DoE, Konfirmation) und unterstuetzt
+sowohl kodierte (-1/+1) als auch natuerliche Faktorwerte.
 
 ```bash
 # MSA-Vorlage befuellen (Type-1 + Reproduzierbarkeit)
@@ -114,10 +128,6 @@ statapult fill Konfirmation.xlsx --seed 42
 # Ausgabe in neue Datei (Original bleibt erhalten)
 statapult fill DoE_Versuchsergebnisse.xlsx -o DoE_filled.xlsx --seed 42
 ```
-
-Der `fill`-Befehl liest den Versuchsplan aus der Excel-Datei, fuehrt fuer jede
-Zeile einen simulierten Schuss durch und traegt die Ergebnisse direkt ein.
-Die befuellte Datei kann dann im Notebook hochgeladen werden.
 
 ### `control` – Regelkarten-Daten generieren
 
@@ -186,7 +196,6 @@ projekt.doe_ergebnisse = katapult.batch(projekt.versuchsplan)
 | `--format text\|csv\|json` | Ausgabeformat |
 | `--verbose` / `-v` | Zeigt physikalische Zwischenwerte |
 | `--config FILE` | Eigene YAML-Konfiguration laden |
-| `--drag` | Luftwiderstand aktivieren |
 
 ## Konfiguration
 
@@ -197,3 +206,24 @@ statapult shoot --config mein_katapult.yaml --seed 42
 ```
 
 Anpassbar sind u.a. Federkonstante, Arm-Masse, Rauschparameter und Balltypen.
+
+## Tests
+
+```bash
+cd catapult
+pip install -e ".[dev]"
+python -m pytest tests/ -v
+```
+
+115 Tests in 8 Modulen:
+
+| Modul | Tests | Prueft |
+|-------|-------|--------|
+| `test_physics.py` | 14 | Physik-Modell, Effektrichtungen, Distanzbereich |
+| `test_noise.py` | 10 | Rauschmodell, Operator-Bias, Drift |
+| `test_factors.py` | 10 | Faktor-Definitionen, Coding, helper.py-Format |
+| `test_simulator.py` | 12 | Orchestrator, Batch, Seed-Reproduzierbarkeit |
+| `test_cli.py` | 8 | CLI-Subcommands, Ausgabeformate |
+| `test_statistical_properties.py` | 8 | DOE/MSA/Cpk/Regelkarten-Eignung |
+| `test_integration.py` | 32 | DOE -> Modell -> Optimierung -> Konfirmation |
+| `test_excel_filler.py` | 18 | MSA/DoE/Konfirmation Excel-Roundtrip |
