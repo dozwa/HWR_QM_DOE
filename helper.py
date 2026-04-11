@@ -1215,12 +1215,22 @@ def _parse_faktoren_aus_excel(daten: pd.DataFrame) -> List[Dict]:
 
 
 def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
-                 mit_interaktionen: bool = True) -> Any:
+                 mit_interaktionen: bool = True,
+                 mit_drei_faktor_interaktionen: bool = False,
+                 mit_quadratischen_termen: bool = False) -> Any:
     """
-    Fittet ein OLS-Regressionsmodell: ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
+    Fittet ein OLS-Regressionsmodell.
+
+    Standard (2FI): ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
+    RSM (mit_quadratischen_termen=True): ŷ = β₀ + Σβᵢxᵢ + Σβᵢᵢxᵢ² + Σβᵢⱼxᵢxⱼ + ε
 
     daten: DataFrame mit kodierten Faktorspalten + 'Ergebnis' Spalte
     faktoren: Liste der Faktor-Dicts (werden automatisch aus Excel erkannt wenn leer)
+    mit_interaktionen: 2-Faktor-Interaktionen einbeziehen (Standard: True)
+    mit_drei_faktor_interaktionen: 3-Faktor-Interaktionen einbeziehen (Standard: False).
+        Empfohlen bei ≥4 Faktoren mit 2^k-Design (genug Freiheitsgrade).
+    mit_quadratischen_termen: Quadratische Terme xᵢ² einbeziehen (Standard: False).
+        Empfohlen bei ≥4 Faktoren. Erfordert Centerpoints im Versuchsplan.
     """
     from statsmodels.formula.api import ols
 
@@ -1288,16 +1298,35 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     # NaN-Zeilen entfernen
     df = df.dropna(subset=["Y"] + faktor_namen)
 
+    # Quadratische Spalten erzeugen (fuer RSM)
+    quad_namen = []
+    if mit_quadratischen_termen:
+        for name in faktor_namen:
+            sq_name = f"{name}_sq"
+            df[sq_name] = df[name] ** 2
+            quad_namen.append(sq_name)
+
     # Formel aufbauen
     haupteffekte = " + ".join(faktor_namen)
+    terme = [haupteffekte]
+    if quad_namen:
+        terme.append(" + ".join(quad_namen))
     if mit_interaktionen:
-        interaktionen = []
+        zweier = []
         for i in range(len(faktor_namen)):
             for j in range(i + 1, len(faktor_namen)):
-                interaktionen.append(f"{faktor_namen[i]}:{faktor_namen[j]}")
-        formel = f"Y ~ {haupteffekte} + {' + '.join(interaktionen)}" if interaktionen else f"Y ~ {haupteffekte}"
-    else:
-        formel = f"Y ~ {haupteffekte}"
+                zweier.append(f"{faktor_namen[i]}:{faktor_namen[j]}")
+        if zweier:
+            terme.append(" + ".join(zweier))
+    if mit_drei_faktor_interaktionen and len(faktor_namen) >= 3:
+        dreier = []
+        for i in range(len(faktor_namen)):
+            for j in range(i + 1, len(faktor_namen)):
+                for k_ in range(j + 1, len(faktor_namen)):
+                    dreier.append(f"{faktor_namen[i]}:{faktor_namen[j]}:{faktor_namen[k_]}")
+        if dreier:
+            terme.append(" + ".join(dreier))
+    formel = "Y ~ " + " + ".join(terme)
 
     model = ols(formel, data=df).fit()
 
@@ -1305,6 +1334,7 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     model._faktor_namen = faktor_namen
     model._faktor_details = faktoren
     model._rename_map = {v: k for k, v in rename_map.items()}
+    model._quad_namen = quad_namen
     model._daten = df
 
     return model
@@ -1913,13 +1943,26 @@ def optimiere_einstellungen(modell, zielweite: float,
     fn = modell._faktor_namen
 
     def _predict_at(x_coded):
-        """Vorhersage an einem Punkt."""
+        """Vorhersage an einem Punkt (mit 2FI, optionalen 3FI und quadratischen Termen)."""
         pred_dict = {name: val for name, val in zip(fn, x_coded)}
+        # Quadratische Terme
+        for i, name in enumerate(fn):
+            sq_name = f"{name}_sq"
+            if sq_name in modell.params.index:
+                pred_dict[sq_name] = x_coded[i] ** 2
+        # 2-Faktor-Interaktionen
         for i in range(len(fn)):
             for j in range(i + 1, len(fn)):
                 col_name = f"{fn[i]}:{fn[j]}"
                 if col_name in modell.params.index:
                     pred_dict[col_name] = x_coded[i] * x_coded[j]
+        # 3-Faktor-Interaktionen
+        for i in range(len(fn)):
+            for j in range(i + 1, len(fn)):
+                for k_ in range(j + 1, len(fn)):
+                    col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                    if col_name in modell.params.index:
+                        pred_dict[col_name] = x_coded[i] * x_coded[j] * x_coded[k_]
         pred_df = pd.DataFrame([pred_dict])
         pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                    fill_value=0)
@@ -1962,11 +2005,21 @@ def optimiere_einstellungen(modell, zielweite: float,
 
     # Vorhersage + Intervall
     pred_dict = {name: val for name, val in zip(fn, optimal_coded)}
+    for i, name in enumerate(fn):
+        sq_name = f"{name}_sq"
+        if sq_name in modell.params.index:
+            pred_dict[sq_name] = optimal_coded[i] ** 2
     for i in range(len(fn)):
         for j in range(i + 1, len(fn)):
             col_name = f"{fn[i]}:{fn[j]}"
             if col_name in modell.params.index:
                 pred_dict[col_name] = optimal_coded[i] * optimal_coded[j]
+    for i in range(len(fn)):
+        for j in range(i + 1, len(fn)):
+            for k_ in range(j + 1, len(fn)):
+                col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                if col_name in modell.params.index:
+                    pred_dict[col_name] = optimal_coded[i] * optimal_coded[j] * optimal_coded[k_]
     pred_df = pd.DataFrame([pred_dict])
     pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
