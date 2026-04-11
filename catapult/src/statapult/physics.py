@@ -31,7 +31,8 @@ from .factors import ALL_FACTORS
 # ======================================================================
 
 # Basis-Wurfweite bei Mittelstellung aller Faktoren (cm)
-D_BASE: float = 280.0
+# Kalibriert fuer ein realistisches Tisch-Statapult (60-300 cm Bereich)
+D_BASE: float = 150.0
 
 # Faktor-Koeffizienten: (linearer_Anteil c, quadratischer_Anteil q)
 # d = D_BASE * prod(1 + c_i * x_i + q_i * x_i^2)
@@ -39,13 +40,13 @@ D_BASE: float = 280.0
 # c_i > 0: hoehere Einstellung -> laengere Distanz
 # q_i < 0: Optimum liegt in der Mitte (Kruemmung)
 FACTOR_COEFFICIENTS: Dict[str, tuple[float, float]] = {
-    "abzugswinkel":       (0.14, 0.00),    # Energie ~ Rueckzugswinkel
-    "stoppwinkel":        (0.10, -0.04),   # Abwurfwinkel, leichte Kruemmung
-    "gummiband_position": (0.13, 0.00),    # Federkraft ~ Position
-    "becherposition":     (0.08, -0.05),   # Hebelarm-Optimum (Kruemmung)
-    "pin_hoehe":          (0.06, 0.00),    # Abwurfhoehe
-    "ballgewicht":        (-0.12, 0.00),   # Schwerer Ball = kuerzer
-    "wind":               (0.04, 0.00),    # Rueckenwind hilft
+    "abzugswinkel":       (0.18, 0.00),    # Energie ~ Rueckzugswinkel
+    "stoppwinkel":        (0.13, -0.04),   # Abwurfwinkel, leichte Kruemmung
+    "gummiband_position": (0.16, 0.00),    # Federkraft ~ Position
+    "becherposition":     (0.10, -0.05),   # Hebelarm-Optimum (Kruemmung)
+    "pin_hoehe":          (0.07, 0.00),    # Abwurfhoehe
+    "ballgewicht":        (-0.13, 0.00),   # Schwerer Ball = kuerzer
+    "wind":               (0.05, 0.00),    # Rueckenwind hilft
 }
 
 

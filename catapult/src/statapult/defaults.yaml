@@ -69,7 +69,7 @@ factors:
     unit: cm
   ballgewicht:
     low: 5
-    high: 45
+    high: 30
     default: 10
     unit: g
   wind:

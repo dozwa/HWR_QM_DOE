@@ -109,7 +109,7 @@ ENVIRONMENTAL_FACTORS: Dict[str, Factor] = {
         key="ballgewicht",
         einheit="g",
         low=5,
-        high=45,
+        high=30,
         default=10,
         description="Masse des Balls",
     ),

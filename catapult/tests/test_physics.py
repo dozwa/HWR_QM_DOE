@@ -17,22 +17,22 @@ class TestComputeDistance:
     """Tests fuer das kalibrierte Distanzmodell."""
 
     def test_center_point_range(self):
-        """Center-point sollte im Bereich 270-310 cm liegen."""
+        """Center-point sollte im Bereich 140-190 cm liegen."""
         defaults = {k: f.default for k, f in ALL_FACTORS.items()}
         d = compute_distance(defaults)
-        assert 270 <= d <= 310, f"Center distance {d:.1f} cm out of range"
+        assert 140 <= d <= 190, f"Center distance {d:.1f} cm out of range"
 
     def test_all_low_above_minimum(self):
-        """Alle Faktoren auf Low sollte > 100 cm geben."""
+        """Alle Faktoren auf Low sollte > 50 cm geben."""
         settings = {k: f.low for k, f in ALL_FACTORS.items()}
         d = compute_distance(settings)
-        assert d > 100, f"All-low distance {d:.1f} cm too short"
+        assert d > 50, f"All-low distance {d:.1f} cm too short"
 
     def test_all_high_below_maximum(self):
-        """Alle Faktoren auf High sollte < 600 cm geben."""
+        """Alle Faktoren auf High sollte < 400 cm geben."""
         settings = {k: f.high for k, f in ALL_FACTORS.items()}
         d = compute_distance(settings)
-        assert d < 600, f"All-high distance {d:.1f} cm too long"
+        assert d < 400, f"All-high distance {d:.1f} cm too long"
 
     def test_abzugswinkel_positive_effect(self):
         """Hoeherer Abzugswinkel = laengere Distanz."""
