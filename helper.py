@@ -219,8 +219,7 @@ def _save_fig(projekt: Projekt, fig: plt.Figure, name: str):
 # 2b. ZIELSCHEIBEN-VISUALISIERUNG
 # ═══════════════════════════════════════════════════════════════════
 
-def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D",
-                            max_range=None):
+def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D"):
     """Zeichnet den Zielscheiben-Hintergrund."""
     if modus == "2D":
         # Volle 2D-Zielscheibe
@@ -229,8 +228,8 @@ def _draw_target_background(ax, zielweite=0, toleranz=None, modus="1D",
             ax.add_patch(circle)
         ax.axhline(0, color=GRAY, linewidth=0.5, linestyle="--", alpha=0.4)
         ax.axvline(0, color=GRAY, linewidth=0.5, linestyle="--", alpha=0.4)
-        if toleranz and max_range:
-            tol_circle = plt.Circle((0, 0), toleranz / max_range,
+        if toleranz:
+            tol_circle = plt.Circle((0, 0), toleranz / 100,
                                      fill=False, edgecolor=GREEN, linewidth=2, linestyle="--")
             ax.add_patch(tol_circle)
         ax.set_xlim(-1.3, 1.3)
@@ -267,12 +266,10 @@ def plot_zielscheibe(daten_weite, ziel, toleranz, modus="1D",
 
     if modus == "2D" and daten_quer is not None:
         # Normalisiere auf Zielscheiben-Skala
-        max_range = max(toleranz * 2,
-                        np.max(daten_weite) - np.min(daten_weite),
-                        np.max(daten_quer) - np.min(daten_quer)) * 1.2
+        max_range = max(toleranz * 2, np.ptp(daten_weite), np.ptp(daten_quer)) * 1.2
         x_norm = (daten_weite - ziel) / max_range
         y_norm = daten_quer / max_range
-        _draw_target_background(ax, modus="2D", toleranz=toleranz, max_range=max_range)
+        _draw_target_background(ax, modus="2D", toleranz=toleranz)
         ax.scatter(x_norm, y_norm, c=farbe, s=60, zorder=5,
                    edgecolors="white", linewidths=0.8)
         ax.set_xlabel("Weite (relativ zum Ziel)")
@@ -304,14 +301,14 @@ def plot_zielscheibe(daten_weite, ziel, toleranz, modus="1D",
 
 def plot_4_zielscheiben_referenz():
     """Plottet die 4 Referenz-Zielscheiben (Accuracy × Precision)."""
-    rng = np.random.default_rng(42)
+    np.random.seed(42)
     fig, axes = plt.subplots(2, 2, figsize=(8, 8))
 
     configs = [
-        ("Hohe Accuracy\nHohe Precision", rng.normal(0, 0.08, (15, 2)), GREEN),
-        ("Niedrige Accuracy\nHohe Precision", rng.normal(0, 0.08, (15, 2)) + [0.5, 0.3], ORANGE),
-        ("Hohe Accuracy\nNiedrige Precision", rng.normal(0, 0.35, (15, 2)), BLUE),
-        ("Niedrige Accuracy\nNiedrige Precision", rng.normal(0, 0.35, (15, 2)) + [0.4, -0.3], RED),
+        ("Hohe Accuracy\nHohe Precision", np.random.normal(0, 0.08, (15, 2)), GREEN),
+        ("Niedrige Accuracy\nHohe Precision", np.random.normal(0, 0.08, (15, 2)) + [0.5, 0.3], ORANGE),
+        ("Hohe Accuracy\nNiedrige Precision", np.random.normal(0, 0.35, (15, 2)), BLUE),
+        ("Niedrige Accuracy\nNiedrige Precision", np.random.normal(0, 0.35, (15, 2)) + [0.4, -0.3], RED),
     ]
 
     for ax, (title, pts, col) in zip(axes.flat, configs):
@@ -660,15 +657,10 @@ def analysiere_gage_rr(daten: pd.DataFrame) -> Dict:
 
     # Varianzkomponenten (negative auf 0 setzen)
     var_repeatability = max(0, ms_residual)
-    if _hat_interaktion:
-        var_interact = max(0, (ms_interact - ms_residual) / n_wiederholungen)
-        var_reproducibility = max(0, (ms_person - ms_interact) / (n_teile * n_wiederholungen))
-        var_teil = max(0, (ms_teil - ms_interact) / (n_personen * n_wiederholungen))
-    else:
-        # Ohne Interaktionsterm: E(MS_Person) = σ² + n_teile·n_rep·σ²_person
-        var_interact = 0
-        var_reproducibility = max(0, (ms_person - ms_residual) / (n_teile * n_wiederholungen))
-        var_teil = max(0, (ms_teil - ms_residual) / (n_personen * n_wiederholungen))
+    var_interact = max(0, (ms_interact - ms_residual) / n_wiederholungen) \
+        if ms_interact > 0 else 0
+    var_reproducibility = max(0, (ms_person - ms_interact) / (n_teile * n_wiederholungen))
+    var_teil = max(0, (ms_teil - ms_interact) / (n_personen * n_wiederholungen))
 
     var_grr = var_repeatability + var_reproducibility + var_interact
     var_total = var_teil + var_grr
@@ -1165,9 +1157,8 @@ def erstelle_doe_excel(versuchsplan: pd.DataFrame, faktoren: List[Dict],
         c.border = thin_border
 
     # Spaltenbreiten
-    from openpyxl.utils import get_column_letter
     for col_idx in range(1, len(headers) + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 18
+        ws.column_dimensions[chr(64 + min(col_idx, 26))].width = 18
 
     wb.save(output_path)
     return os.path.abspath(output_path)
@@ -1224,12 +1215,25 @@ def _parse_faktoren_aus_excel(daten: pd.DataFrame) -> List[Dict]:
 
 
 def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
-                 mit_interaktionen: bool = True) -> Any:
+                 mit_interaktionen: bool = True,
+                 mit_drei_faktor_interaktionen: bool = False,
+                 mit_quadratischen_termen: str = "auto") -> Any:
     """
-    Fittet ein OLS-Regressionsmodell: ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
+    Fittet ein OLS-Regressionsmodell.
+
+    Standard (2FI): ŷ = β₀ + Σβᵢxᵢ + Σβᵢⱼxᵢxⱼ + ε
+    RSM (mit x²):  ŷ = β₀ + Σβᵢxᵢ + Σβᵢᵢxᵢ² + Σβᵢⱼxᵢxⱼ + ε
 
     daten: DataFrame mit kodierten Faktorspalten + 'Ergebnis' Spalte
-    faktoren: Liste der Faktor-Dicts (werden automatisch aus Excel erkannt wenn leer)
+    faktoren: Liste der Faktor-Dicts
+    mit_interaktionen: 2-Faktor-Interaktionen einbeziehen (Standard: True)
+    mit_drei_faktor_interaktionen: 3-Faktor-Interaktionen einbeziehen
+    mit_quadratischen_termen: Quadratische Terme xᵢ² einbeziehen.
+        - "auto" (Standard): Prüft ob Centerpoints vorhanden sind. Wenn ja,
+          fittet beide Modelle (linear + quadratisch) und wählt das bessere
+          anhand R²_adj. Wenn keine Centerpoints: nur lineares Modell.
+        - True: Erzwingt quadratische Terme (Warnung wenn keine Centerpoints)
+        - False: Kein quadratisches Modell
     """
     from statsmodels.formula.api import ols
 
@@ -1297,23 +1301,105 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     # NaN-Zeilen entfernen
     df = df.dropna(subset=["Y"] + faktor_namen)
 
-    # Formel aufbauen
-    haupteffekte = " + ".join(faktor_namen)
-    if mit_interaktionen:
-        interaktionen = []
-        for i in range(len(faktor_namen)):
-            for j in range(i + 1, len(faktor_namen)):
-                interaktionen.append(f"{faktor_namen[i]}:{faktor_namen[j]}")
-        formel = f"Y ~ {haupteffekte} + {' + '.join(interaktionen)}" if interaktionen else f"Y ~ {haupteffekte}"
-    else:
-        formel = f"Y ~ {haupteffekte}"
+    # --- Centerpoint-Erkennung ---
+    # Centerpoints haben kodierte Werte nahe 0 (nicht ±1)
+    hat_centerpoints = False
+    if len(df) > 0:
+        coded_abs = df[faktor_namen].abs()
+        cp_mask = (coded_abs < 0.5).all(axis=1)
+        n_centerpoints = cp_mask.sum()
+        hat_centerpoints = n_centerpoints >= 2
 
-    model = ols(formel, data=df).fit()
+    # --- Entscheidung: quadratische Terme testen? ---
+    teste_quad = False
+    if mit_quadratischen_termen == "auto":
+        teste_quad = hat_centerpoints
+    elif mit_quadratischen_termen is True:
+        if not hat_centerpoints:
+            print("⚠️ Quadratische Terme angefordert, aber keine Centerpoints "
+                  "gefunden. x²-Koeffizienten sind ohne Centerpoints nicht "
+                  "zuverlässig schätzbar.")
+        teste_quad = True
+
+    # --- Quadratische Spalten für ALLE Faktoren vorbereiten ---
+    alle_quad = []
+    for name in faktor_namen:
+        sq_name = f"{name}_sq"
+        df[sq_name] = df[name] ** 2
+        alle_quad.append(sq_name)
+
+    # --- Formel aufbauen ---
+    def _build_formula(fn, quad, mit_2fi, mit_3fi):
+        terme = [" + ".join(fn)]
+        if quad:
+            terme.append(" + ".join(quad))
+        if mit_2fi:
+            zweier = [f"{fn[i]}:{fn[j]}"
+                      for i in range(len(fn)) for j in range(i + 1, len(fn))]
+            if zweier:
+                terme.append(" + ".join(zweier))
+        if mit_3fi and len(fn) >= 3:
+            dreier = [f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                      for i in range(len(fn)) for j in range(i + 1, len(fn))
+                      for k_ in range(j + 1, len(fn))]
+            if dreier:
+                terme.append(" + ".join(dreier))
+        return "Y ~ " + " + ".join(terme)
+
+    # --- Modell fitten ---
+    # Schritt 1: Lineares Basismodell (immer)
+    formel_lin = _build_formula(faktor_namen, [], mit_interaktionen,
+                                mit_drei_faktor_interaktionen)
+    model_lin = ols(formel_lin, data=df).fit()
+
+    # Schritt 2: Per-Faktor quadratische Terme testen
+    quad_namen = []
+    if teste_quad:
+        # Volles quadratisches Modell fitten
+        formel_voll = _build_formula(faktor_namen, alle_quad, mit_interaktionen,
+                                     mit_drei_faktor_interaktionen)
+        model_voll = ols(formel_voll, data=df).fit()
+
+        # Jeden x²-Term einzeln bewerten: behalten wenn p < 0.10
+        alpha_quad = 0.10
+        behalten = []
+        verworfen = []
+        for sq_name in alle_quad:
+            if sq_name in model_voll.pvalues:
+                p = model_voll.pvalues[sq_name]
+                if p < alpha_quad:
+                    behalten.append(sq_name)
+                else:
+                    verworfen.append(sq_name)
+
+        if behalten:
+            quad_namen = behalten
+            # Finales Modell nur mit signifikanten x²-Termen
+            formel_final = _build_formula(faktor_namen, quad_namen,
+                                          mit_interaktionen,
+                                          mit_drei_faktor_interaktionen)
+            model = ols(formel_final, data=df).fit()
+            # Faktor-Namen aus den sq-Namen ableiten (z.B. "X_sq" → "X")
+            namen_kurz = [s.replace("_sq", "") for s in behalten]
+            print(f"ℹ️ Krümmung erkannt bei: {', '.join(namen_kurz)} "
+                  f"(R²_adj: {model.rsquared_adj:.4f} "
+                  f"vs. linear {model_lin.rsquared_adj:.4f})")
+            if verworfen:
+                namen_verw = [s.replace("_sq", "") for s in verworfen]
+                print(f"   Kein x²-Term nötig für: {', '.join(namen_verw)}")
+        else:
+            model = model_lin
+            if mit_quadratischen_termen == "auto":
+                print(f"ℹ️ Kein Faktor zeigt signifikante Krümmung — "
+                      f"lineares Modell beibehalten (R²_adj: {model_lin.rsquared_adj:.4f})")
+    else:
+        model = model_lin
 
     # Metadaten anhängen
     model._faktor_namen = faktor_namen
     model._faktor_details = faktoren
     model._rename_map = {v: k for k, v in rename_map.items()}
+    model._quad_namen = quad_namen
     model._daten = df
 
     return model
@@ -1332,19 +1418,19 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
 
     df = modell._daten.copy()
     faktor_namen = modell._faktor_namen
-    faktor_details = getattr(modell, "_faktor_details", [])
+    # Metadaten vom Original-Modell sichern
+    _orig_faktor_details = getattr(modell, "_faktor_details", [])
+    _orig_rename_map = getattr(modell, "_rename_map", {})
+    _orig_quad_namen = getattr(modell, "_quad_namen", [])
     log = []
 
     # Aktuelle Terme sammeln
     current_terms = [t for t in modell.params.index if t != "Intercept"]
-    # Terme die durch Hierarchie geschützt sind (nicht erneut prüfen)
-    protected_terms = set()
 
     while True:
-        # Finde Term mit höchstem p-Wert (geschützte überspringen)
+        # Finde Term mit höchstem p-Wert
         p_values = modell.pvalues.drop("Intercept", errors="ignore")
         p_values = p_values[p_values.index.isin(current_terms)]
-        p_values = p_values.drop(labels=list(protected_terms), errors="ignore")
 
         if p_values.empty:
             break
@@ -1353,7 +1439,7 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         worst_p = p_values[worst_term]
 
         if worst_p <= alpha:
-            break  # Alle verbleibenden sind signifikant
+            break  # Alle signifikant
 
         # Hierarchie-Check: Ist worst_term ein Haupteffekt?
         is_haupteffekt = ":" not in worst_term
@@ -1370,16 +1456,22 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
                         )
                         break
             if protected:
-                protected_terms.add(worst_term)
-                continue
+                # Markiere als geprüft, versuche nächsten
+                p_values = p_values.drop(worst_term)
+                if p_values.empty:
+                    break
+                # Versuche den nächsthöheren p-Wert
+                worst_term = p_values.idxmax()
+                worst_p = p_values[worst_term]
+                if worst_p <= alpha:
+                    break
+                if ":" not in worst_term:
+                    # Auch diesen prüfen...
+                    continue
 
         # Term entfernen
         current_terms.remove(worst_term)
-        protected_terms.discard(worst_term)
         log.append(f"❌ {worst_term} entfernt (p={worst_p:.3f})")
-
-        # Nach Entfernung einer Interaktion: Schutzstatus neu prüfen
-        protected_terms.clear()
 
         if not current_terms:
             log.append("⚠️ Alle Terme entfernt – Modell nur mit Intercept")
@@ -1389,7 +1481,9 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         formel = "Y ~ " + " + ".join(current_terms)
         modell = ols(formel, data=df).fit()
         modell._faktor_namen = faktor_namen
-        modell._faktor_details = faktor_details
+        modell._faktor_details = _orig_faktor_details
+        modell._rename_map = _orig_rename_map
+        modell._quad_namen = _orig_quad_namen
         modell._daten = df
 
     if not log:
@@ -1578,21 +1672,7 @@ def pruefe_lack_of_fit(modell, daten: pd.DataFrame) -> Dict:
         return {"test_moeglich": False, "grund": "Zu wenig Centerpoints"}
 
     # Vorhersage am Centerpoint
-    # Stetige Faktoren sind 0, binäre Faktoren sind -1 im Centerpoint
-    pred_at_center = modell.params["Intercept"]
-    if len(cp_data) > 0:
-        cp_row = cp_data[faktor_namen].iloc[0]
-        for term, coef in modell.params.items():
-            if term == "Intercept":
-                continue
-            if ":" in term:
-                parts = term.split(":")
-                val = 1.0
-                for p in parts:
-                    val *= cp_row.get(p, 0.0)
-                pred_at_center += coef * val
-            elif term in cp_row.index:
-                pred_at_center += coef * cp_row[term]
+    pred_at_center = modell.params["Intercept"]  # Alle kodierten Werte = 0
 
     # Tatsächliche Centerpoint-Werte
     if "Y" in cp_data.columns:
@@ -1722,8 +1802,9 @@ def plot_kontur(modell, faktoren: List[Dict], zielweite: float,
 
     grid_df = grid_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    grid_df.insert(0, "Intercept", 1.0)
-    Z = modell.predict(grid_df).values.reshape(n_grid, n_grid)
+    import statsmodels.api as sm
+    grid_df_const = sm.add_constant(grid_df)
+    Z = modell.predict(grid_df_const).values.reshape(n_grid, n_grid)
 
     # Plot
     fig, ax = plt.subplots(figsize=(8, 6))
@@ -1752,6 +1833,7 @@ def plot_kontur(modell, faktoren: List[Dict], zielweite: float,
 def _predict_grid(modell, faktor_idx: Tuple[int, int],
                   n_grid: int = 50) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Erzeugt ein Vorhersage-Grid für zwei Faktoren. Gibt (X1, X2, Z) zurück."""
+    import statsmodels.api as sm
     f1_idx, f2_idx = faktor_idx
     fn = modell._faktor_namen
 
@@ -1771,8 +1853,8 @@ def _predict_grid(modell, faktor_idx: Tuple[int, int],
 
     grid_df = grid_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    grid_df.insert(0, "Intercept", 1.0)
-    Z = modell.predict(grid_df).values.reshape(n_grid, n_grid)
+    grid_df_const = sm.add_constant(grid_df)
+    Z = modell.predict(grid_df_const).values.reshape(n_grid, n_grid)
     return X1, X2, Z
 
 
@@ -1904,7 +1986,13 @@ def _transmitted_variance(x_coded, modell, sigma_setting=0.1):
 
     total = 0.0
     for k in range(len(fn)):
+        # dy/dx_k = beta_k + 2*beta_{k_sq}*x_k + sum(beta_{k:j} * x_j)
         dy_dxk = get_beta(fn[k])
+        # Quadratischer Term: dy/dx_k += 2 * beta_{k_sq} * x_k
+        sq_name = f"{fn[k]}_sq"
+        if sq_name in params.index:
+            dy_dxk += 2.0 * get_beta(sq_name) * x_coded[k]
+        # Interaktionsterme
         for j in range(len(fn)):
             if j == k:
                 continue
@@ -1932,17 +2020,31 @@ def optimiere_einstellungen(modell, zielweite: float,
     fn = modell._faktor_namen
 
     def _predict_at(x_coded):
-        """Vorhersage an einem Punkt."""
+        """Vorhersage an einem Punkt (mit 2FI, optionalen 3FI und quadratischen Termen)."""
         pred_dict = {name: val for name, val in zip(fn, x_coded)}
+        # Quadratische Terme
+        for i, name in enumerate(fn):
+            sq_name = f"{name}_sq"
+            if sq_name in modell.params.index:
+                pred_dict[sq_name] = x_coded[i] ** 2
+        # 2-Faktor-Interaktionen
         for i in range(len(fn)):
             for j in range(i + 1, len(fn)):
                 col_name = f"{fn[i]}:{fn[j]}"
                 if col_name in modell.params.index:
                     pred_dict[col_name] = x_coded[i] * x_coded[j]
+        # 3-Faktor-Interaktionen
+        for i in range(len(fn)):
+            for j in range(i + 1, len(fn)):
+                for k_ in range(j + 1, len(fn)):
+                    col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                    if col_name in modell.params.index:
+                        pred_dict[col_name] = x_coded[i] * x_coded[j] * x_coded[k_]
         pred_df = pd.DataFrame([pred_dict])
         pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                    fill_value=0)
-        pred_df.insert(0, "Intercept", 1.0)
+        import statsmodels.api as sm
+        pred_df = sm.add_constant(pred_df)
         return modell.predict(pred_df).values[0]
 
     def objective(x_coded):
@@ -1980,15 +2082,26 @@ def optimiere_einstellungen(modell, zielweite: float,
 
     # Vorhersage + Intervall
     pred_dict = {name: val for name, val in zip(fn, optimal_coded)}
+    for i, name in enumerate(fn):
+        sq_name = f"{name}_sq"
+        if sq_name in modell.params.index:
+            pred_dict[sq_name] = optimal_coded[i] ** 2
     for i in range(len(fn)):
         for j in range(i + 1, len(fn)):
             col_name = f"{fn[i]}:{fn[j]}"
             if col_name in modell.params.index:
                 pred_dict[col_name] = optimal_coded[i] * optimal_coded[j]
+    for i in range(len(fn)):
+        for j in range(i + 1, len(fn)):
+            for k_ in range(j + 1, len(fn)):
+                col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                if col_name in modell.params.index:
+                    pred_dict[col_name] = optimal_coded[i] * optimal_coded[j] * optimal_coded[k_]
     pred_df = pd.DataFrame([pred_dict])
     pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
                                fill_value=0)
-    pred_df.insert(0, "Intercept", 1.0)
+    import statsmodels.api as sm
+    pred_df = sm.add_constant(pred_df)
 
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]
@@ -2179,7 +2292,8 @@ def prognostiziere(modell, faktoren: List[Dict],
         else:
             x_coded[i] = val
 
-    # Vorhersage
+    # Vorhersage via statsmodels
+    import statsmodels.api as sm
     pred_dict = {name: x_coded[idx] for idx, name in enumerate(fn)}
     for i in range(len(fn)):
         for j in range(i + 1, len(fn)):
@@ -2191,7 +2305,7 @@ def prognostiziere(modell, faktoren: List[Dict],
         columns=[c for c in modell.params.index if c != "Intercept"],
         fill_value=0
     )
-    pred_df.insert(0, "Intercept", 1.0)
+    pred_df = sm.add_constant(pred_df)
 
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "statapult"
+version = "0.1.0"
+description = "Virtueller Six Sigma Katapult-Simulator fuer DOE-Uebungen"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.20",
+    "pyyaml>=5.0",
+]
+
+[project.optional-dependencies]
+batch = ["pandas>=1.3", "openpyxl>=3.0"]
+dev = ["pytest>=7.0", "pandas>=1.3", "openpyxl>=3.0"]
+
+[project.scripts]
+statapult = "statapult.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+statapult = ["defaults.yaml"]
