@@ -7,12 +7,15 @@ Studierende optimieren die Wurfweite eines selbstgebauten Katapults mithilfe sta
 ## Aufbau
 
 ```
-DMAIC_Katapult_Versuch.ipynb   # Interaktives Notebook (Google Colab)
+DMAIC_Katapult_Versuch.ipynb   # Interaktives Notebook (generiert, für Google Colab)
 helper.py                      # Statistische Logik (~3.300 Zeilen)
+scripts/build_notebook.py      # Generator für das Notebook
+scripts/notebook_builder/      # Phasen-Module (intro, define, measure, analyze, improve, control, closing)
 ```
 
 - **Notebook** (`DMAIC_Katapult_Versuch.ipynb`): Führt Studierende Schritt für Schritt durch die 5 DMAIC-Phasen. Alle komplexen Berechnungen sind in `helper.py` gekapselt, sodass die Interaktion über einfache Funktionsaufrufe und Formularfelder erfolgt.
 - **Helper-Modul** (`helper.py`): Enthält die gesamte statistische Logik, Visualisierungen und Export-Funktionen. Wird beim Start des Notebooks automatisch von GitHub geladen.
+- **Notebook-Generator**: Das Notebook wird aus Python-Quellen erzeugt. Jede DMAIC-Phase hat ein eigenes Modul in `scripts/notebook_builder/` mit Zellen-Inhalten als String-Konstanten. Zum Ändern des Notebooks die jeweilige Phase-Datei editieren und anschließend `python scripts/build_notebook.py` ausführen. `python scripts/build_notebook.py --check` prüft, ob das committete Notebook mit den Python-Quellen übereinstimmt.
 
 ## DMAIC-Phasen im Notebook
 
