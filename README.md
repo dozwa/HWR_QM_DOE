@@ -20,8 +20,10 @@ scripts/notebook_builder/      # Phasen-Module (intro, define, measure, analyze,
 ## DMAIC-Phasen im Notebook
 
 ### 1. DEFINE
-- Zielweite wird per Gruppen-Seed deterministisch zugewiesen (200–450 cm)
-- 5 Testwürfe zur Bestandsaufnahme mit CV-Bewertung
+- **Faktoren festlegen:** bis zu 5 Katapult-Einstellungen (Name, Einheit, Low/High, Centerpoint-Flag)
+- **Katapult-Vermessung:** je 3 Würfe bei Min- und Max-Konfiguration, pro Faktor dokumentierter Einstellwert → realistische Reichweiten-Spanne
+- **Zielweite:** vom Nutzer festgelegt (Default 300 cm), Plausibilitätsprüfung gegen die gemessene Spanne
+- 5 Testwürfe bei typischer Einstellung mit CV-Bewertung
 - Projektcharter als strukturiertes Formular
 
 ### 2. MEASURE
@@ -31,6 +33,7 @@ scripts/notebook_builder/      # Phasen-Module (intro, define, measure, analyze,
 - Excel-Template-Generierung für die Datenerfassung
 
 ### 3. ANALYZE
+- **Faktoren verfeinern:** aus der in DEFINE festgelegten Liste Teilmenge wählen und Centerpoint-Flag je Faktor anpassen
 - **Design of Experiments:** Voll-, halb- und viertelfaktoriell (2^k) mit Blocking, Centerpoints und Randomisierung
 - **OLS-Regression:** Haupteffekte + Zweifach-Interaktionen
 - **Hierarchisches Pruning:** Backward Elimination mit Hierarchie-Schutz (signifikante Interaktion schützt zugehörige Haupteffekte)
@@ -71,8 +74,9 @@ In Colab werden fehlende Pakete automatisch installiert (Zelle 1).
 
 1. Notebook in Google Colab öffnen
 2. Zellen 1–4 ausführen (Bibliotheken, Drive, Initialisierung, Projektsetup)
-3. Gruppenname und -nummer eingeben
-4. Den Anweisungen im Notebook folgen – Phase für Phase
+3. Gruppenname, Gruppennummer und gewünschte Zielweite (Default 300 cm) eingeben
+4. In DEFINE Faktoren definieren und Katapult vermessen (Min/Max); bei Bedarf Zielweite anpassen
+5. Den Anweisungen im Notebook folgen – Phase für Phase
 
 ## Nutzung in Google Colab
 
@@ -106,7 +110,8 @@ Beim Einrichten gibt es zwei Modi:
 **Neues Projekt:**
 1. Modus auf `Neues Projekt` belassen
 2. Euren **Gruppennamen** und **Gruppennummer** eintragen
-3. Zelle ausführen – die Zielweite wird automatisch aus dem Gruppennamen abgeleitet
+3. Gewünschte **Zielweite** (Default 300 cm) und **Toleranz** setzen – beides lässt sich nach der Min/Max-Vermessung in DEFINE noch anpassen
+4. Zelle ausführen
 
 **Fortschritt laden (nach Session-Abbruch):**
 1. Modus auf `Fortschritt laden` ändern
@@ -161,7 +166,7 @@ MyDrive/
 | Google Drive nicht verbunden | Zelle 2 ausführen und Zugriff erlauben |
 | `helper.py` Fehler beim Laden | Netzwerkverbindung prüfen; bei Offline-Nutzung `helper.py` manuell hochladen |
 | Excel-Upload funktioniert nicht | Dateiformat prüfen (`.xlsx`), keine Formeln in Datenzellen |
-| Fehlermeldung „Mindestens 3 Faktoren" | In der Analyze-Phase mindestens 3 Faktoren definieren |
+| Fehlermeldung „Mindestens 3 Faktoren" | In DEFINE mindestens 3 Faktoren definieren (in ANALYZE bleiben nach der Verfeinerung mind. 3 aktiv) |
 | Plots werden nicht angezeigt | Zelle erneut ausführen; ggf. `plt.show()` prüfen |
 
 ### Tipps
