@@ -92,6 +92,25 @@ python -m pytest catapult/tests/test_physics.py -v
 python -m pytest catapult/tests/test_physics.py::test_name -v
 ```
 
+## Tests für `helper.py` (tests/)
+
+Ergebnisorientierte Testsuite für die Notebook-Funktionen in `helper.py`. Nutzt `statapult` als Datenquelle (realistische Wurfsimulation), prüft aber Ergebnis-Invarianten, nicht Implementierung.
+
+- `tests/conftest.py` — matplotlib Agg, isolierte Drive-Base per `drive_base` Fixture, Figure-Cleanup.
+- `tests/virtuelle_gruppe.py` — Fabrik-Helfer `baue_define / baue_measure / baue_analyze / baue_improve / baue_control / fertige_gruppe` je Profil (`praezision`, `typisch`, `streu`, `drift`).
+- Phasen-Tests: `test_define.py`, `test_measure.py`, `test_analyze.py`, `test_improve.py`, `test_control.py`.
+- `test_persistence.py` — Save/Load-Roundtrips zwischen allen Phasen.
+- `test_e2e.py` — 4 End-to-End-Läufe (je ein Profil) plus Cross-Profile-Vergleiche und eine module-scoped „Musterteam"-Fixture.
+
+Ausführen:
+
+```bash
+python -m pytest tests/ -q                # helper.py Suite (~16 s)
+python -m pytest catapult/tests/ -q       # statapult-interne Tests (~12 s)
+```
+
+Testumgebung braucht: `numpy pandas scipy statsmodels matplotlib openpyxl pytest` + `pip install -e ./catapult`.
+
 ## Cross-Cutting Notes
 
 - Language: user-facing strings (notebook cells, CLI, README) are in **German**. Keep that convention when editing those surfaces; internal code comments may be English.
