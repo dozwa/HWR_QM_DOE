@@ -95,6 +95,14 @@ class Projekt:
     # DEFINE
     testwuerfe: np.ndarray = field(default_factory=lambda: np.array([]))
     charter: Dict[str, str] = field(default_factory=dict)
+    # Faktoren werden bereits in DEFINE definiert (Master-Liste).
+    faktoren: List[Dict] = field(default_factory=list)
+    # Katapult-Vermessung (Min/Max-Konfiguration mit je 3 Würfen)
+    vermessung_min_wuerfe: np.ndarray = field(default_factory=lambda: np.array([]))
+    vermessung_max_wuerfe: np.ndarray = field(default_factory=lambda: np.array([]))
+    vermessung_min_einstellung: Dict[str, float] = field(default_factory=dict)
+    vermessung_max_einstellung: Dict[str, float] = field(default_factory=dict)
+    vermessung_beschreibung: str = ""
 
     # MEASURE
     msa_type1: Optional[Dict] = None
@@ -103,8 +111,8 @@ class Projekt:
     baseline_wuerfe: np.ndarray = field(default_factory=lambda: np.array([]))
     baseline_stats: Optional[Dict] = None
 
-    # ANALYZE
-    faktoren: List[Dict] = field(default_factory=list)
+    # ANALYZE – ggf. reduzierte Teilmenge + Centerpoint-Entscheidung je Faktor
+    faktoren_doe: List[Dict] = field(default_factory=list)
     versuchsplan: Optional[pd.DataFrame] = None
     doe_ergebnisse: Optional[pd.DataFrame] = None
     modell: Any = None
@@ -129,14 +137,20 @@ class Projekt:
     csv_daten: Dict[str, pd.DataFrame] = field(default_factory=dict)
 
 
-def init_projekt(gruppenname: str, gruppennummer: int, toleranz: float = 15.0) -> Projekt:
-    """Initialisiert ein Projekt mit deterministischem Seed und zufälliger Zielweite."""
+def init_projekt(
+    gruppenname: str,
+    gruppennummer: int,
+    zielweite: float = 300.0,
+    toleranz: float = 15.0,
+) -> Projekt:
+    """Initialisiert ein Projekt mit deterministischem Seed und nutzerdefinierter Zielweite.
+
+    Der Seed wird aus Gruppenname + Gruppennummer abgeleitet und für Verzeichnisnamen
+    sowie Randomisierungen in MSA/ANALYZE verwendet. Die Zielweite wird **nicht** mehr
+    zufällig gezogen, sondern vom Nutzer vorgegeben (Default 300 cm).
+    """
     seed_str = f"{gruppenname.strip().lower()}_{gruppennummer}"
     seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16) % (2**31)
-    rng = np.random.RandomState(seed)
-    # Zielweite: 200–450 cm in 10er-Schritten
-    moegliche_weiten = list(range(200, 451, 10))
-    zielweite = moegliche_weiten[rng.randint(0, len(moegliche_weiten))]
 
     p = Projekt(
         gruppenname=gruppenname,
@@ -146,6 +160,12 @@ def init_projekt(gruppenname: str, gruppennummer: int, toleranz: float = 15.0) -
         toleranz=toleranz,
     )
     return p
+
+
+def _effektive_faktoren(projekt: Projekt) -> List[Dict]:
+    """Gibt `faktoren_doe` zurück, falls in ANALYZE eine Teilmenge gewählt wurde,
+    sonst die in DEFINE definierte Master-Liste `faktoren`."""
+    return projekt.faktoren_doe if projekt.faktoren_doe else projekt.faktoren
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -355,6 +375,165 @@ def zeige_testwurf_ergebnis(projekt: Projekt):
         (float("inf"), "❌", "Katapult hat ein Problem! Arretierung prüfen, ggf. nachbessern."),
     ]
     zeige_ampel(stats["cv"], cv_schwellen, einheit="%", titel="Variationskoeffizient (CV):")
+
+
+# ───────────────────────────────────────────────────────────────────
+# 3a. KATAPULT-VERMESSUNG (Min/Max-Charakterisierung)
+# ───────────────────────────────────────────────────────────────────
+
+def speichere_vermessung(
+    projekt: Projekt,
+    min_wuerfe,
+    max_wuerfe,
+    min_einstellung: Dict[str, float],
+    max_einstellung: Dict[str, float],
+    beschreibung: str = "",
+) -> None:
+    """Speichert die Katapult-Vermessung (Min/Max) im Projekt und persistiert.
+
+    Leere / ungültige Würfe (≤ 0) werden aussortiert. Einstellungen werden
+    als Mapping Faktorname → Wert übernommen. Bei weniger als einem gültigen
+    Wurf je Seite wird gewarnt, aber nichts überschrieben.
+    """
+    min_list = list(min_wuerfe) if min_wuerfe is not None else []
+    max_list = list(max_wuerfe) if max_wuerfe is not None else []
+    _min = np.array([w for w in min_list if w and w > 0], dtype=float)
+    _max = np.array([w for w in max_list if w and w > 0], dtype=float)
+
+    if len(_min) > 0:
+        projekt.vermessung_min_wuerfe = _min
+    if len(_max) > 0:
+        projekt.vermessung_max_wuerfe = _max
+
+    if min_einstellung:
+        projekt.vermessung_min_einstellung = dict(min_einstellung)
+    if max_einstellung:
+        projekt.vermessung_max_einstellung = dict(max_einstellung)
+
+    if beschreibung:
+        projekt.vermessung_beschreibung = beschreibung
+
+    # Nur warnen, wenn Werte übergeben wurden, die komplett herausgefiltert wurden.
+    if min_list and len(_min) == 0:
+        print("⚠️ Keine gültigen Min-Würfe (Werte > 0 erwartet).")
+    if max_list and len(_max) == 0:
+        print("⚠️ Keine gültigen Max-Würfe (Werte > 0 erwartet).")
+
+    speichere_fortschritt(projekt)
+
+
+def zeige_vermessung(projekt: Projekt) -> None:
+    """Visualisiert die gemessene Katapult-Spanne inkl. Zielweiten-Marker."""
+    min_w = projekt.vermessung_min_wuerfe
+    max_w = projekt.vermessung_max_wuerfe
+
+    if len(min_w) == 0 or len(max_w) == 0:
+        print("ℹ️ Vermessung noch nicht vollständig – bitte Min- und Max-Würfe eintragen.")
+        return
+
+    min_mu = float(np.mean(min_w))
+    max_mu = float(np.mean(max_w))
+    ziel = float(projekt.zielweite)
+
+    fig, ax = plt.subplots(figsize=(9, 2.6))
+    ax.hlines(0, min_mu, max_mu, color=BLUE, linewidth=6, alpha=0.35,
+              label=f"Gemessene Spanne ({min_mu:.0f}–{max_mu:.0f} cm)")
+    ax.scatter(min_w, [0] * len(min_w), color=BLUE, s=60, zorder=5,
+               edgecolors="white", linewidths=0.8, label="Min-Würfe")
+    ax.scatter(max_w, [0] * len(max_w), color=ORANGE, s=60, zorder=5,
+               edgecolors="white", linewidths=0.8, label="Max-Würfe")
+    ax.axvline(ziel, color=GREEN, linewidth=2.5, linestyle="--",
+               label=f"Zielweite {ziel:.0f} cm")
+    if projekt.toleranz:
+        ax.axvspan(ziel - projekt.toleranz, ziel + projekt.toleranz,
+                   alpha=0.12, color=GREEN)
+    ax.set_yticks([])
+    ax.set_xlabel("Wurfweite (cm)")
+    ax.set_title("Katapult-Charakterisierung: Min/Max-Vermessung",
+                 fontsize=12, fontweight="bold")
+    ax.legend(loc="upper right", fontsize=9)
+    margin = max(30.0, 0.08 * (max_mu - min_mu))
+    ax.set_xlim(min(min_mu, ziel) - margin, max(max_mu, ziel) + margin)
+    fig.tight_layout()
+    _save_fig(projekt, fig, "define_vermessung")
+    plt.show()
+
+    # Ampel: Zielweite innerhalb der Spanne?
+    if min_mu <= ziel <= max_mu:
+        farbe, symbol, text = GREEN, "✅", "Zielweite liegt innerhalb der gemessenen Spanne."
+    else:
+        farbe, symbol, text = ORANGE, "⚠️", (
+            "Zielweite liegt außerhalb der gemessenen Spanne – ggf. anpassen."
+        )
+    display(HTML(f"""
+    <div style="padding:10px; border-left:4px solid {farbe}; background:{farbe}11;
+                border-radius:4px; margin:8px 0;">
+        <span style="font-size:1.2em;">{symbol}</span> <strong>Plausibilität:</strong> {text}
+    </div>"""))
+
+    # Einstellungs-Tabelle
+    faktoren = projekt.faktoren
+    if faktoren and (projekt.vermessung_min_einstellung or projekt.vermessung_max_einstellung):
+        rows = ""
+        for f in faktoren:
+            name = f["name"]
+            lo = projekt.vermessung_min_einstellung.get(name, "—")
+            hi = projekt.vermessung_max_einstellung.get(name, "—")
+            einheit = f.get("einheit", "")
+            rows += (f"<tr><td style='padding:6px;font-weight:bold;'>{name}</td>"
+                     f"<td style='padding:6px;'>{lo} {einheit}</td>"
+                     f"<td style='padding:6px;'>{hi} {einheit}</td></tr>")
+        display(HTML(f"""
+        <table style="border-collapse:collapse; width:100%; border:1px solid #E5E7EB; margin-top:8px;">
+            <tr style="background:{LIGHT_BLUE};">
+                <th style="padding:8px;text-align:left;">Faktor</th>
+                <th style="padding:8px;text-align:left;">Min-Konfiguration</th>
+                <th style="padding:8px;text-align:left;">Max-Konfiguration</th>
+            </tr>
+            {rows}
+        </table>"""))
+
+    if projekt.vermessung_beschreibung:
+        display(HTML(
+            f"<div style='margin-top:8px; padding:8px; background:#F9FAFB; "
+            f"border:1px solid #E5E7EB; border-radius:4px;'>"
+            f"<strong>Beschreibung:</strong> {projekt.vermessung_beschreibung}</div>"
+        ))
+
+
+def setze_zielweite(projekt: Projekt, zielweite: float) -> None:
+    """Setzt `projekt.zielweite`, speichert den Fortschritt und warnt bei Inkonsistenz.
+
+    Warnt, wenn die gewählte Zielweite außerhalb der durch die Vermessung belegten
+    Spanne [mean(min_wuerfe), mean(max_wuerfe)] liegt. Die Zielweite wird dennoch
+    gesetzt, damit bewusst anspruchsvolle Ziele möglich bleiben.
+    """
+    try:
+        z = float(zielweite)
+    except (TypeError, ValueError):
+        print(f"⚠️ Zielweite '{zielweite}' ist keine Zahl – wird ignoriert.")
+        return
+
+    if z <= 0:
+        print(f"⚠️ Zielweite muss > 0 sein (erhalten: {z}).")
+        return
+
+    projekt.zielweite = z
+
+    if len(projekt.vermessung_min_wuerfe) > 0 and len(projekt.vermessung_max_wuerfe) > 0:
+        lo = float(np.mean(projekt.vermessung_min_wuerfe))
+        hi = float(np.mean(projekt.vermessung_max_wuerfe))
+        if not (lo <= z <= hi):
+            print(f"⚠️ Zielweite {z:.0f} cm liegt außerhalb der gemessenen Spanne "
+                  f"[{lo:.0f}, {hi:.0f}] cm – Erreichen ist unsicher.")
+        else:
+            print(f"✅ Zielweite {z:.0f} cm liegt innerhalb der gemessenen Spanne "
+                  f"[{lo:.0f}, {hi:.0f}] cm.")
+    else:
+        print(f"ℹ️ Zielweite auf {z:.0f} cm gesetzt "
+              f"(noch keine Min/Max-Vermessung zur Plausibilitätsprüfung vorhanden).")
+
+    speichere_fortschritt(projekt)
 
 
 def formatiere_charter(projekt: Projekt) -> str:
@@ -3069,14 +3248,21 @@ def _projekt_to_dict(projekt: Projekt) -> dict:
         d[key] = getattr(projekt, key)
 
     # Numpy-Arrays
-    for key in ("testwuerfe", "baseline_wuerfe", "konfirmation_wuerfe"):
+    for key in ("testwuerfe", "baseline_wuerfe", "konfirmation_wuerfe",
+                "vermessung_min_wuerfe", "vermessung_max_wuerfe"):
         arr = getattr(projekt, key)
         d[key] = arr.tolist() if len(arr) > 0 else []
 
     # Einfache Dicts / Listen
     d["charter"] = projekt.charter
     d["faktoren"] = projekt.faktoren
+    d["faktoren_doe"] = projekt.faktoren_doe
     d["pruning_log"] = projekt.pruning_log
+
+    # Vermessung (DEFINE)
+    d["vermessung_min_einstellung"] = projekt.vermessung_min_einstellung
+    d["vermessung_max_einstellung"] = projekt.vermessung_max_einstellung
+    d["vermessung_beschreibung"] = projekt.vermessung_beschreibung
 
     # MSA
     if projekt.msa_type1 is not None:
@@ -3144,14 +3330,21 @@ def _dict_to_projekt(d: dict) -> Projekt:
     )
 
     # Arrays
-    for key in ("testwuerfe", "baseline_wuerfe", "konfirmation_wuerfe"):
+    for key in ("testwuerfe", "baseline_wuerfe", "konfirmation_wuerfe",
+                "vermessung_min_wuerfe", "vermessung_max_wuerfe"):
         val = d.get(key, [])
         setattr(p, key, np.array(val) if val else np.array([]))
 
     # Einfache Felder
     p.charter = d.get("charter", {})
     p.faktoren = d.get("faktoren", [])
+    p.faktoren_doe = d.get("faktoren_doe", [])
     p.pruning_log = d.get("pruning_log", [])
+
+    # Vermessung (DEFINE)
+    p.vermessung_min_einstellung = d.get("vermessung_min_einstellung", {})
+    p.vermessung_max_einstellung = d.get("vermessung_max_einstellung", {})
+    p.vermessung_beschreibung = d.get("vermessung_beschreibung", "")
 
     # MSA
     p.msa_type1 = d.get("msa_type1")
@@ -3190,11 +3383,12 @@ def _recompute_derived(projekt: Projekt):
             print(f"⚠️ Baseline-Statistiken konnten nicht berechnet werden: {e}")
 
     # Versuchsplan
-    if projekt.faktoren and projekt.versuchsplan_config:
+    _fak_doe = _effektive_faktoren(projekt)
+    if _fak_doe and projekt.versuchsplan_config:
         try:
             cfg = projekt.versuchsplan_config
             projekt.versuchsplan = generiere_versuchsplan(
-                projekt.faktoren,
+                _fak_doe,
                 wiederholungen=cfg.get("wiederholungen", 3),
                 blocking=cfg.get("blocking", False),
                 centerpoints=cfg.get("centerpoints", 3),
@@ -3205,9 +3399,9 @@ def _recompute_derived(projekt: Projekt):
             print(f"⚠️ Versuchsplan konnte nicht regeneriert werden: {e}")
 
     # Regressionsmodell
-    if projekt.doe_ergebnisse is not None and projekt.faktoren:
+    if projekt.doe_ergebnisse is not None and _fak_doe:
         try:
-            projekt.modell = fitte_modell(projekt.doe_ergebnisse, projekt.faktoren)
+            projekt.modell = fitte_modell(projekt.doe_ergebnisse, _fak_doe)
             projekt.modell_gepruned, projekt.pruning_log = hierarchisches_pruning(projekt.modell)
             projekt.modell = projekt.modell_gepruned
         except Exception as e:
@@ -3410,6 +3604,12 @@ def zeige_restore_zusammenfassung(projekt: Projekt):
 
     # Detail-Zeilen sammeln
     details = []
+    details.append(f"Zielweite: {projekt.zielweite:.0f} cm "
+                   f"(Toleranz ±{projekt.toleranz:.0f} cm)")
+    if len(projekt.vermessung_min_wuerfe) > 0 and len(projekt.vermessung_max_wuerfe) > 0:
+        _min = float(np.mean(projekt.vermessung_min_wuerfe))
+        _max = float(np.mean(projekt.vermessung_max_wuerfe))
+        details.append(f"Katapult vermessen: {_min:.0f}–{_max:.0f} cm")
     if len(projekt.testwuerfe) > 0:
         details.append(f"Testwürfe: {len(projekt.testwuerfe)} Stück "
                        f"(μ={np.mean(projekt.testwuerfe):.1f} cm)")
@@ -3446,7 +3646,7 @@ def zeige_restore_zusammenfassung(projekt: Projekt):
     elif phase == "DEFINE":
         naechstes = "Weiter mit <strong>MEASURE</strong>: MSA durchführen und Baseline-Würfe eingeben."
     elif phase == "MEASURE":
-        naechstes = "Weiter mit <strong>ANALYZE</strong>: Faktoren definieren und Versuchsplan erstellen."
+        naechstes = "Weiter mit <strong>ANALYZE</strong>: Faktoren für das DoE verfeinern und Versuchsplan erstellen."
     elif phase == "ANALYZE":
         naechstes = "Weiter mit <strong>IMPROVE</strong>: Konturplot analysieren und Einstellungen optimieren."
     elif phase == "IMPROVE":

@@ -1,33 +1,57 @@
 """DMAIC phase ANALYZE: cells 32..54 of the notebook."""
 from __future__ import annotations
 
-from .cells import code, colab_code, factor_def_cell, md, phase_export_cell
-
-# Faktor-Definitionen: einfach editieren, werden via factor_def_cell als 5
-# gleichartige Zellen emittiert (3 Pflicht + 2 optional).
-FACTOR_DEFAULTS = [
-    dict(n=1, name="Winkel",       unit="Grad", low=30.0, high=45.0),
-    dict(n=2, name="Spannung",     unit="cm",   low=5.0,  high=15.0),
-    dict(n=3, name="Ballposition", unit="cm",   low=0.0,  high=5.0),
-    dict(n=4, optional=True,
-         optional_hint="optional – leer lassen wenn nur 3 Faktoren",
-         no_factor_msg="Kein 4. Faktor definiert (3-Faktor-Design)"),
-    dict(n=5, optional=True,
-         optional_hint="optional – leer lassen wenn nur 3–4 Faktoren",
-         no_factor_msg="Kein 5. Faktor definiert"),
-]
+from .cells import code, colab_code, md, phase_export_cell
 
 _ANALYZE_32_X = r"""---
 # Phase 3: ANALYZE – Planung
 
 ## Welche Faktoren beeinflussen die Wurfweite?
 
-In der Analyze-Phase identifiziert ihr die **Einflussfaktoren** eures Katapults durch ein **statistisches Experiment (DoE)**.
+Die Faktoren habt ihr in DEFINE bereits festgelegt. Hier **verfeinert** ihr sie für das DoE: Welche Faktoren sollen in den Versuchsplan, und bei welchen sind Centerpoints (mittlere Stufe) sinnvoll?
 
-**Schritt 1:** Faktoren und Stufen definieren
+**Schritt 1:** Faktoren für das DoE verfeinern (Teilmenge + Centerpoint-Entscheidung)
 **Schritt 2:** Versuchsplan generieren
 **Schritt 3:** Versuche durchführen
 **Schritt 4:** Modell auswerten"""
+
+_ANALYZE_33_FAKTOREN_VERFEINERN = r'''# Aktive Faktoren und Centerpoint-Entscheidung (vorbelegt aus DEFINE)
+faktor1_aktiv = True if len(projekt.faktoren) > 0 else False #@param {type:"boolean"}
+faktor1_centerpoint = True #@param {type:"boolean"}
+faktor2_aktiv = True if len(projekt.faktoren) > 1 else False #@param {type:"boolean"}
+faktor2_centerpoint = True #@param {type:"boolean"}
+faktor3_aktiv = True if len(projekt.faktoren) > 2 else False #@param {type:"boolean"}
+faktor3_centerpoint = True #@param {type:"boolean"}
+faktor4_aktiv = True if len(projekt.faktoren) > 3 else False #@param {type:"boolean"}
+faktor4_centerpoint = True #@param {type:"boolean"}
+faktor5_aktiv = True if len(projekt.faktoren) > 4 else False #@param {type:"boolean"}
+faktor5_centerpoint = True #@param {type:"boolean"}
+
+if not projekt.faktoren:
+    print("❌ In DEFINE wurden noch keine Faktoren definiert. Bitte zurück zu DEFINE → 'Faktoren übernehmen'.")
+else:
+    _aktiv_flags = [faktor1_aktiv, faktor2_aktiv, faktor3_aktiv, faktor4_aktiv, faktor5_aktiv]
+    _cp_flags = [faktor1_centerpoint, faktor2_centerpoint, faktor3_centerpoint,
+                 faktor4_centerpoint, faktor5_centerpoint]
+
+    _faktoren_doe = []
+    for i, f in enumerate(projekt.faktoren):
+        if not _aktiv_flags[i]:
+            continue
+        f_copy = dict(f)
+        f_copy["centerpoint_moeglich"] = bool(_cp_flags[i] and f.get("centerpoint_moeglich", True))
+        _faktoren_doe.append(f_copy)
+
+    if len(_faktoren_doe) < 3:
+        print(f"❌ Mindestens 3 aktive Faktoren nötig (derzeit {len(_faktoren_doe)}).")
+    else:
+        projekt.faktoren_doe = _faktoren_doe
+        print(f"✅ {len(_faktoren_doe)} Faktoren für das DoE gewählt:")
+        for f in _faktoren_doe:
+            cp = "mit CP" if f["centerpoint_moeglich"] else "ohne CP"
+            print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}] ({cp})")
+        helper.speichere_fortschritt(projekt)
+'''
 
 _ANALYZE_38_TITLE_VERSUCHSPLAN_GENERIEREN = r"""design_typ = "Vollfaktoriell (2^k)" #@param ["Vollfaktoriell (2^k)", "Halbfraktionell (2^(k-1))", "Viertelfraktionell (2^(k-2))"]
 wiederholungen = 3 #@param {type:"integer"}
@@ -41,39 +65,22 @@ _design = next(v for k, v in _design_map.items() if k in design_typ)
 # Wiederholungen validieren
 wiederholungen = max(1, min(10, int(wiederholungen)))
 
-# Faktorliste zusammenbauen (aus Zellen 30-34 oder gespeichertem Fortschritt)
-try:
-    _faktoren_neu = [faktor1, faktor2, faktor3]
-    try:
-        if faktor4 and faktor4.get("name"):
-            _faktoren_neu.append(faktor4)
-    except NameError:
-        pass
-    try:
-        if faktor5 and faktor5.get("name"):
-            _faktoren_neu.append(faktor5)
-    except NameError:
-        pass
-    projekt.faktoren = _faktoren_neu
-except NameError:
-    if projekt.faktoren:
-        print(f"ℹ️ {len(projekt.faktoren)} Faktoren aus gespeichertem Fortschritt geladen:")
-        for f in projekt.faktoren:
-            print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
-    else:
-        print("❌ Bitte zuerst die Faktoren definieren (Zellen oben ausführen).")
-        raise
+# DoE-Faktoren aus ANALYZE-Verfeinerung (Fallback: Master-Liste aus DEFINE)
+_fak_doe = helper._effektive_faktoren(projekt)
+if not _fak_doe:
+    print("❌ Keine Faktoren verfügbar. Bitte zuerst DEFINE → 'Faktoren übernehmen' ausführen.")
+    raise RuntimeError("keine Faktoren")
 
 # Validierung
-for f in projekt.faktoren:
+for f in _fak_doe:
     if f["low"] == f["high"]:
-        print(f"❌ Faktor '{f["name"]}': Low und High sind identisch ({f["low"]}). Bitte unterschiedliche Stufen wählen!")
+        print(f"❌ Faktor '{f['name']}': Low und High sind identisch ({f['low']}). Bitte Faktor-Definition in DEFINE anpassen!")
     if f["low"] > f["high"]:
         f["low"], f["high"] = f["high"], f["low"]
-        print(f"⚠️ Faktor '{f["name"]}': Low und High vertauscht – automatisch korrigiert.")
+        print(f"⚠️ Faktor '{f['name']}': Low und High vertauscht – automatisch korrigiert.")
 
 # Centerpoints: nur möglich wenn mindestens ein Faktor stetig ist
-_cp_faktoren = [f for f in projekt.faktoren if f.get("centerpoint_moeglich", True)]
+_cp_faktoren = [f for f in _fak_doe if f.get("centerpoint_moeglich", True)]
 if not _cp_faktoren:
     if centerpoints > 0:
         print("ℹ️ Keine stetigen Faktoren → Centerpoints nicht möglich, auf 0 gesetzt.")
@@ -81,7 +88,7 @@ if not _cp_faktoren:
 elif centerpoints < 0:
     centerpoints = 0
 
-_bin_namen = [f["name"] for f in projekt.faktoren if not f.get("centerpoint_moeglich", True)]
+_bin_namen = [f["name"] for f in _fak_doe if not f.get("centerpoint_moeglich", True)]
 if _bin_namen:
     print(f"ℹ️ Zweistufige Faktoren (kein Centerpoint): {', '.join(_bin_namen)}")
 
@@ -93,7 +100,7 @@ projekt.versuchsplan_config = {
 }
 
 projekt.versuchsplan = helper.generiere_versuchsplan(
-    projekt.faktoren,
+    _fak_doe,
     wiederholungen=wiederholungen,
     blocking=blocking,
     centerpoints=centerpoints,
@@ -101,7 +108,7 @@ projekt.versuchsplan = helper.generiere_versuchsplan(
     design=_design,
 )
 
-helper.zeige_versuchsplan_info(projekt.versuchsplan, projekt.faktoren)
+helper.zeige_versuchsplan_info(projekt.versuchsplan, _fak_doe)
 print(f"\nDie ersten 10 Versuche:")
 display(projekt.versuchsplan.head(10))
 helper.speichere_fortschritt(projekt)
@@ -125,7 +132,7 @@ Ein Koeffizient von +25 bei kodierter Eingabe bedeutet: Wenn der Faktor von −1
 </details>"""
 
 _ANALYZE_40_TITLE_VERSUCHSPLAN_ALS_EXCEL_H = r"""filepath = helper.erstelle_doe_excel(
-    projekt.versuchsplan, projekt.faktoren
+    projekt.versuchsplan, helper._effektive_faktoren(projekt)
 )
 print(f"✅ Excel erstellt!")
 
@@ -210,15 +217,17 @@ helper.speichere_fortschritt(projekt)
 """
 
 _ANALYZE_44_TITLE_REGRESSIONSMODELL_BERECH = r"""try:
-    # Faktoren aus Excel erkennen, falls noch nicht definiert
-    if not projekt.faktoren and projekt.doe_ergebnisse is not None:
-        projekt.faktoren = helper._parse_faktoren_aus_excel(projekt.doe_ergebnisse)
-        if projekt.faktoren:
-            print(f"ℹ️ {len(projekt.faktoren)} Faktoren aus Excel erkannt:")
-            for f in projekt.faktoren:
+    # Faktoren aus Excel erkennen, falls weder Master- noch DoE-Liste vorhanden
+    _fak = helper._effektive_faktoren(projekt)
+    if not _fak and projekt.doe_ergebnisse is not None:
+        _fak = helper._parse_faktoren_aus_excel(projekt.doe_ergebnisse)
+        projekt.faktoren_doe = _fak
+        if _fak:
+            print(f"ℹ️ {len(_fak)} Faktoren aus Excel erkannt:")
+            for f in _fak:
                 print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
 
-    projekt.modell = helper.fitte_modell(projekt.doe_ergebnisse, projekt.faktoren)
+    projekt.modell = helper.fitte_modell(projekt.doe_ergebnisse, _fak)
     print(f"✅ Modell berechnet!")
     print(f"   R² = {projekt.modell.rsquared:.4f}")
     print(f"   Adj. R² = {projekt.modell.rsquared_adj:.4f}")
@@ -232,10 +241,11 @@ except Exception as e:
     print("  - Habt ihr Dezimalpunkte statt Kommas verwendet?")
     if projekt.doe_ergebnisse is not None:
         print(f"\n  Spalten in der Excel: {projekt.doe_ergebnisse.columns.tolist()}")
-    if projekt.faktoren:
-        print(f"  Definierte Faktoren: {[f['name'] for f in projekt.faktoren]}")
+    _fak = helper._effektive_faktoren(projekt)
+    if _fak:
+        print(f"  Verwendete Faktoren: {[f['name'] for f in _fak]}")
     else:
-        print("  ⚠️ Keine Faktoren definiert! Bitte zuerst die Faktor-Zellen (oben) ausführen.")
+        print("  ⚠️ Keine Faktoren definiert! Bitte DEFINE → 'Faktoren übernehmen' ausführen.")
 """
 
 _ANALYZE_45_TITLE_AUTOMATISCHES_MODELL_PRU = r"""projekt.modell_gepruned, projekt.pruning_log = helper.hierarchisches_pruning(projekt.modell)
@@ -324,7 +334,7 @@ _ANALYZE_53_DIV_STYLE_PADDING_10PX_BORDER = r"""<div style="padding:10px; border
 def cells():
     return [
         md(_ANALYZE_32_X),
-        *[factor_def_cell(**kw) for kw in FACTOR_DEFAULTS],
+        colab_code("🧩 Faktoren für das DoE verfeinern", _ANALYZE_33_FAKTOREN_VERFEINERN),
         colab_code("⚙️ Versuchsplan generieren", _ANALYZE_38_TITLE_VERSUCHSPLAN_GENERIEREN),
         md(_ANALYZE_39_DETAILS_STYLE_MARGIN_10PX_0_PA),
         colab_code("📥 Versuchsplan als Excel herunterladen", _ANALYZE_40_TITLE_VERSUCHSPLAN_ALS_EXCEL_H),
