@@ -23,14 +23,14 @@ scripts/notebook_builder/      # Phasen-Module (intro, define, measure, analyze,
 - **Faktoren festlegen:** bis zu 5 Katapult-Einstellungen (Name, Einheit, Low/High, Centerpoint-Flag)
 - **Katapult-Vermessung:** je eine eigene Eingabezelle für **Einstellung** und **Würfe** auf Min- und Max-Seite (3 Würfe je Konfiguration) → realistische Reichweiten-Spanne
 - **Zielweite:** vom Nutzer festgelegt (Default 300 cm), Plausibilitätsprüfung gegen die gemessene Spanne
-- **Manuelle Annäherung (OFAT):** Studierende finden iterativ eine Einstellung, mit der sie die Zielweite treffen — pro Iteration darf nur *ein* Faktor geändert werden (Notebook warnt bei Verstoß). Die finalisierte Einstellung wird als **typische Einstellung** übernommen.
-- 5 Testwürfe mit dieser typischen Einstellung, CV-Bewertung
+- **Initiale Einstellung per OFAT:** Studierende tasten sich am Katapult iterativ an die Zielweite heran (pro Iteration nur einen Faktor variieren). Die gefundene Einstellung wird im Notebook als **initiale Einstellung** dokumentiert und gilt für die folgenden Testwürfe und die Baseline.
+- 5 Testwürfe bei der initialen Einstellung zur CV-Bewertung
 - Projektcharter als strukturiertes Formular (inkl. typischer Einstellung)
 
 ### 2. MEASURE
 - **MSA Type-1:** Bias und Repeatability je messende Person
 - **Gage R&R (ANOVA, AIAG-konform):** Varianzzerlegung in Repeatability, Reproducibility und Interaktion; %GRR-Bewertung
-- **Baseline:** 10–15 Würfe mit der in DEFINE festgelegten typischen Einstellung; Histogramm, Normalverteilungskurve und Shapiro-Wilk-Test
+- **Baseline:** 10–15 Würfe mit der in DEFINE festgelegten initialen Einstellung; Histogramm, Normalverteilungskurve und Shapiro-Wilk-Test
 - Excel-Template-Generierung für die Datenerfassung
 
 ### 3. ANALYZE
