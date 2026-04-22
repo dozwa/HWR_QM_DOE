@@ -1,4 +1,4 @@
-"""Tests für die neuen DEFINE-Helfer: Annäherung und typische Einstellung."""
+"""Tests für die neuen DEFINE-Helfer: Annäherung und initiale Einstellung."""
 from __future__ import annotations
 
 import numpy as np
@@ -61,36 +61,36 @@ def test_annaeherung_log_roundtrip(drive_base):
 
 
 # ─────────────────────────────────────────────────────────────
-# setze_typische_einstellung
+# setze_initiale_einstellung
 # ─────────────────────────────────────────────────────────────
 
-def test_typische_einstellung_aus_letzter_iteration(drive_base):
+def test_initiale_einstellung_aus_letzter_iteration(drive_base):
     p = vg.baue_define(profile="typisch")
     helper.protokolliere_annaeherung(p, {"A": 10}, [290])
     helper.protokolliere_annaeherung(p, {"A": 12}, [300])
-    helper.setze_typische_einstellung(p)
-    assert p.typische_einstellung == {"A": 12}
+    helper.setze_initiale_einstellung(p)
+    assert p.initiale_einstellung == {"A": 12}
 
 
-def test_typische_einstellung_explizit_uebergeben(drive_base):
+def test_initiale_einstellung_explizit_uebergeben(drive_base):
     p = vg.baue_define(profile="typisch")
-    helper.setze_typische_einstellung(p, {"Abzugswinkel": 155, "Becherposition": 16})
-    assert p.typische_einstellung == {"Abzugswinkel": 155, "Becherposition": 16}
+    helper.setze_initiale_einstellung(p, {"Abzugswinkel": 155, "Becherposition": 16})
+    assert p.initiale_einstellung == {"Abzugswinkel": 155, "Becherposition": 16}
 
 
-def test_typische_einstellung_ohne_log_warnt(drive_base, capsys):
+def test_initiale_einstellung_ohne_log_warnt(drive_base, capsys):
     p = vg.baue_define(profile="typisch")
-    helper.setze_typische_einstellung(p)  # kein annaeherung_log, kein Argument
+    helper.setze_initiale_einstellung(p)  # kein annaeherung_log, kein Argument
     out = capsys.readouterr().out
-    assert p.typische_einstellung == {}
+    assert p.initiale_einstellung == {}
     assert "Keine Annäherungs-Iteration" in out or "keine" in out.lower()
 
 
-def test_typische_einstellung_roundtrip(drive_base):
+def test_initiale_einstellung_roundtrip(drive_base):
     p = vg.baue_define(profile="typisch")
-    helper.setze_typische_einstellung(p, {"Abzugswinkel": 160})
+    helper.setze_initiale_einstellung(p, {"Abzugswinkel": 160})
     q = helper.lade_fortschritt(p.gruppenname, p.gruppennummer)
-    assert q.typische_einstellung == {"Abzugswinkel": 160}
+    assert q.initiale_einstellung == {"Abzugswinkel": 160}
 
 
 # ─────────────────────────────────────────────────────────────
