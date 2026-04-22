@@ -8,11 +8,20 @@ _CONTROL_72_X = r"""---
 
 ## Ist der verbesserte Prozess stabil und fähig?
 
-In der Control-Phase prüft ihr:
-1. **Stabilität:** Läuft der Prozess gleichmäßig? (I-MR-Kontrollkarte)
-2. **Normalverteilung:** Voraussetzung für Cpk (Shapiro-Wilk + Q-Q-Plot)
-3. **Prozessfähigkeit:** Passt der Prozess in die Spezifikation? (Cpk)
-4. **Vorher/Nachher:** Visueller Verbesserungsvergleich"""
+In der Control-Phase prüft ihr die Konfirmationsdaten aus IMPROVE auf vier Kriterien:
+
+**Schritt 1:** Stabilität — I-MR-Kontrollkarte
+**Schritt 2:** Normalverteilung — Shapiro-Wilk + Q-Q-Plot (Voraussetzung für Cpk)
+**Schritt 3:** Prozessfähigkeit — Cpk
+**Schritt 4:** Vorher/Nachher — Baseline vs. Konfirmation"""
+
+_CONTROL_72_SCHRITT1 = r"""## Schritt 1 – Stabilität prüfen"""
+
+_CONTROL_72_SCHRITT2 = r"""## Schritt 2 – Normalverteilung prüfen"""
+
+_CONTROL_72_SCHRITT3 = r"""## Schritt 3 – Prozessfähigkeit (Cpk) berechnen"""
+
+_CONTROL_72_SCHRITT4 = r"""## Schritt 4 – Vorher/Nachher-Vergleich"""
 
 _CONTROL_73_TITLE_I_MR_KONTROLLKARTE_STABI = r"""if len(projekt.konfirmation_wuerfe) > 0:
     projekt.imr_ergebnis = helper.berechne_imr(projekt.konfirmation_wuerfe)
@@ -60,7 +69,7 @@ _CONTROL_75_TITLE_NORMALVERTEILUNGSPR_FUNG = r"""if len(projekt.konfirmation_wue
         helper.zeige_ampel(norm_test['shapiro_p'], shapiro_schwellen,
                           titel="Shapiro-Wilk p-Wert:")"""
 
-_CONTROL_76_PROZESSF_HIGKEIT_CPK_WAS_BEDEU = r"""### Prozessfähigkeit (Cpk) – Was bedeutet das?
+_CONTROL_76_PROZESSF_HIGKEIT_CPK_WAS_BEDEU = r"""### Cpk – Was bedeutet das?
 
 Der **Cpk** misst, ob euer Prozess dauerhaft in die Spezifikation passt:
 
@@ -93,7 +102,7 @@ _CONTROL_77_TITLE_PROZESSF_HIGKEIT_CPK = r"""if len(projekt.konfirmation_wuerfe)
 _CONTROL_78_TITLE_VORHER_NACHHER_ZIELSCHEI = r"""if len(projekt.baseline_wuerfe) > 0 and len(projekt.konfirmation_wuerfe) > 0:
     fig = helper.plot_vorher_nachher(
         projekt.baseline_wuerfe, projekt.konfirmation_wuerfe,
-        projekt.zielweite, projekt.toleranz, projekt.messmodus
+        projekt.zielweite, projekt.toleranz, "1D"
     )
     helper._save_fig(projekt, fig, "control_vorher_nachher")
     plt.show()
@@ -125,12 +134,16 @@ Ein Cpk von 1.0 bedeutet: 99,73% der Werte liegen innerhalb der Spezifikation (b
 def cells():
     return [
         md(_CONTROL_72_X),
-        colab_code("📊 I-MR-Kontrollkarte (Stabilitätsprüfung)", _CONTROL_73_TITLE_I_MR_KONTROLLKARTE_STABI),
+        md(_CONTROL_72_SCHRITT1),
+        colab_code("📊 I-MR-Kontrollkarte", _CONTROL_73_TITLE_I_MR_KONTROLLKARTE_STABI),
         md(_CONTROL_74_DETAILS_STYLE_MARGIN_10PX_0_PA),
-        colab_code("📊 Normalverteilungsprüfung (Voraussetzung für Cpk)", _CONTROL_75_TITLE_NORMALVERTEILUNGSPR_FUNG),
+        md(_CONTROL_72_SCHRITT2),
+        colab_code("📊 Shapiro-Wilk + Q-Q-Plot", _CONTROL_75_TITLE_NORMALVERTEILUNGSPR_FUNG),
+        md(_CONTROL_72_SCHRITT3),
         md(_CONTROL_76_PROZESSF_HIGKEIT_CPK_WAS_BEDEU),
-        colab_code("📊 Prozessfähigkeit (Cpk)", _CONTROL_77_TITLE_PROZESSF_HIGKEIT_CPK),
-        colab_code("📊 Vorher / Nachher – Zielscheiben-Vergleich", _CONTROL_78_TITLE_VORHER_NACHHER_ZIELSCHEI),
+        colab_code("📊 Cpk berechnen", _CONTROL_77_TITLE_PROZESSF_HIGKEIT_CPK),
+        md(_CONTROL_72_SCHRITT4),
+        colab_code("📊 Vorher/Nachher-Zielscheibe", _CONTROL_78_TITLE_VORHER_NACHHER_ZIELSCHEI),
         md(_CONTROL_79_DETAILS_STYLE_MARGIN_10PX_0_PA),
         phase_export_cell("CONTROL"),
     ]

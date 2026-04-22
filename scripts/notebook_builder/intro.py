@@ -14,11 +14,11 @@ Willkommen zum zweiten QM-Tag! Heute durchlauft ihr den **kompletten DMAIC-Zyklu
 **Ablauf:**
 | Phase | Inhalt | Dauer |
 |-------|--------|-------|
-| Define | Zielweite, Testwürfe, Charter | 45 min |
-| Measure | MSA + Baseline | 75 min |
-| Analyze | DoE-Planung + Durchführung + Modell | ~4h |
-| Improve | Optimierung + Konfirmation | 60 min |
-| Control | Kontrollkarte, Cpk, Vorher/Nachher | 30 min |
+| Define | Faktoren · Vermessung · Zielweite · Annäherung (OFAT) · Testwürfe · Charter | 75 min |
+| Measure | MSA (Type-1 + Gage R&R) + Baseline | 75 min |
+| Analyze | Faktoren verfeinern · DoE · Durchführung · Modell | ~4h |
+| Improve | Konturplots · Optimierung · Konfirmation | 60 min |
+| Control | I-MR · Cpk · Vorher/Nachher | 30 min |
 
 ⚠️ **Wichtig:** Zellen der Reihe nach ausführen! Keine Zellen überspringen."""
 

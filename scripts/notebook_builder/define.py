@@ -54,10 +54,11 @@ else:
         projekt = helper.init_projekt(gruppenname, gruppennummer,
                                       zielweite=zielweite, toleranz=toleranz)
         helper.speichere_fortschritt(projekt)
-        print(f"✅ Neues Projekt initialisiert!")
+        print(f"✅ Neues Projekt initialisiert.")
         print(f"   Gruppe: {projekt.gruppenname} (Nr. {projekt.gruppennummer})")
-        print(f"   Zielweite: {projekt.zielweite:.0f} cm ± {projekt.toleranz:.0f} cm")
-        print(f"   (Zielweite könnt ihr nach der Katapult-Vermessung unten noch anpassen.)")
+        print(f"   Zielweite (vorläufig): {projekt.zielweite:.0f} cm ± {projekt.toleranz:.0f} cm")
+        print(f"   Tipp: Zielweite und Toleranz könnt ihr nach der Katapult-Vermessung")
+        print(f"   in 'Schritt 3 – Zielweite festlegen' noch anpassen.")
 """
 
 _DEFINE_06_X = r"""---
@@ -101,11 +102,12 @@ helper.speichere_fortschritt(projekt)
 
 _DEFINE_06C_VERMESSUNG_INTRO = r"""## Schritt 2 – Katapult vermessen
 
-Ermittelt die **Reichweiten-Spanne** eures Katapults:
+Ermittelt die **Reichweiten-Spanne** eures Katapults. Jede Seite (Min/Max) hat zwei Zellen: zuerst die **Einstellung** der Faktoren dokumentieren, dann **3 Würfe** eintragen.
 
-1. Stellt alle Faktoren so ein, dass ihr die **kürzeste** Wurfweite erwartet. Werft 3× und tragt die Werte unten ein.
-2. Stellt alle Faktoren so ein, dass ihr die **längste** Wurfweite erwartet. Werft 3× und tragt ein.
-3. Die tatsächlich eingestellten Werte pro Faktor werden ebenfalls dokumentiert – vorbelegt sind Low (Min) bzw. High (Max) eurer Faktordefinition.
+1. Min-Einstellung: alle Faktoren so wählen, dass ihr die **kürzeste** Wurfweite erwartet. Dann 3× werfen.
+2. Max-Einstellung: alle Faktoren so wählen, dass ihr die **längste** Wurfweite erwartet. Dann 3× werfen.
+
+Die Faktorwerte werden für jede Seite pro Faktor festgehalten — lasst 0 stehen, um den in Schritt 1 gesetzten Low/High-Wert zu übernehmen.
 
 > So erhaltet ihr einen realistischen Bereich, in dem ihr gleich die Zielweite festlegt, und eine reproduzierbare Katapult-Beschreibung."""
 
@@ -228,11 +230,18 @@ _DEFINE_06G_ZIELWEITE_ANPASSEN = r"""## Schritt 3 – Zielweite festlegen
 
 Eure Zielweite ist aktuell **300 cm** (Default aus der Projekt-Einrichtung). Passt den Wert an, wenn euer Katapult die 300 cm nicht stabil erreicht oder ihr eine andere Herausforderung wählen wollt. Die Toleranz (siehe oben) definiert zusammen mit der Zielweite die **Testgrenzen** (LSL/USL), auf die wir in der CONTROL-Phase (Cpk) zurückkommen."""
 
-_DEFINE_06H_ZIELWEITE_SET = r"""neue_zielweite = 300.0 #@param {type:"number"}
+_DEFINE_06H_ZIELWEITE_SET = r"""print(f"Aktuelle Zielweite: {projekt.zielweite:.0f} cm (Toleranz ±{projekt.toleranz:.0f} cm)")
+if len(projekt.vermessung_min_wuerfe) > 0 and len(projekt.vermessung_max_wuerfe) > 0:
+    import numpy as _np
+    _lo = float(_np.mean(projekt.vermessung_min_wuerfe))
+    _hi = float(_np.mean(projekt.vermessung_max_wuerfe))
+    print(f"Gemessene Spanne: {_lo:.0f}–{_hi:.0f} cm")
+
+neue_zielweite = 300.0 #@param {type:"number"}
 helper.setze_zielweite(projekt, neue_zielweite)
 """
 
-_DEFINE_06I_ANNAEHERUNG_INTRO = r"""## Schritt 4 – Zielweite manuell anpeilen (OFAT)
+_DEFINE_06I_ANNAEHERUNG_INTRO = r"""## Schritt 4 – Zielweite manuell anpeilen (One-Factor-At-a-Time, OFAT)
 
 Bevor ihr die Messsystemanalyse macht, **sucht manuell** eine Einstellung, mit der ihr eure Zielweite erreicht.
 
@@ -308,8 +317,8 @@ _DEFINE_06K_TYPISCHE_EINSTELLUNG = r"""# Übernimmt die letzte Annäherungs-Iter
 helper.setze_typische_einstellung(projekt)
 """
 
-_DEFINE_07_TITLE_EURE_ZIELWEITE = r"""print(f"{'='*50}")
-print(f"  EURE AUFGABE")
+_DEFINE_07_TITLE_STATUS_VOR_TESTWUERFEN = r"""print(f"{'='*50}")
+print(f"  STATUS – bereit für die Testwürfe")
 print(f"  Zielweite:  {projekt.zielweite:.0f} cm")
 print(f"  Toleranz:   ±{projekt.toleranz:.0f} cm")
 print(f"  Zielband:   [{projekt.zielweite - projekt.toleranz:.0f}, {projekt.zielweite + projekt.toleranz:.0f}] cm")
@@ -321,7 +330,8 @@ if projekt.typische_einstellung:
         print(f"   • {name}: {val} {einheit}")
     print(f"\nMacht 5 Testwürfe mit genau dieser Einstellung.")
 else:
-    print(f"\nStellt euer Katapult auf eure typische Einstellung und macht 5 Testwürfe.")"""
+    print(f"\nℹ️ Noch keine typische Einstellung festgelegt — führt Schritt 4 aus, ")
+    print(f"   damit Testwürfe und Baseline auf denselben Parametern basieren.")"""
 
 _DEFINE_08_TESTW_RFE_DURCHF_HREN = r"""## Schritt 5 – Testwürfe (CV bei typischer Einstellung)
 
@@ -360,9 +370,9 @@ else:
 
 _DEFINE_10_TITLE_TESTWURF_AUSWERTUNG = r"""helper.zeige_testwurf_ergebnis(projekt)"""
 
-_DEFINE_12_PROJEKTCHARTER = r"""### Projektcharter
+_DEFINE_12_PROJEKTCHARTER = r"""## Schritt 6 – Projektcharter
 
-Die Projektcharter dokumentiert euer Qualitätsverbesserungsprojekt. Sie ist das zentrale Dokument der Define-Phase.
+Die Projektcharter dokumentiert euer Qualitätsverbesserungsprojekt. Sie ist das zentrale Dokument der Define-Phase und bündelt die in den Schritten 1–5 erfassten Informationen (Zielweite, typische Einstellung, Team, Scope).
 
 > 📋 **Für den Bericht:** Die Projektcharter gehört vollständig in euren Bericht!"""
 
@@ -373,6 +383,7 @@ projektleiter = "" #@param {type:"string"}
 protokollant = "" #@param {type:"string"}
 versuchsdurchfuehrende = "" #@param {type:"string"}
 
+from datetime import date as _date
 _einst_str = ", ".join(f"{n}={v}" for n, v in projekt.typische_einstellung.items()) \
              if projekt.typische_einstellung else "(noch nicht festgelegt)"
 projekt.charter = {
@@ -385,7 +396,7 @@ projekt.charter = {
     "Projektleiter/in": projektleiter,
     "Protokollant/in": protokollant,
     "Versuchsdurchführende": versuchsdurchfuehrende,
-    "Datum": "22.04.2026",
+    "Datum": _date.today().strftime("%d.%m.%Y"),
 }
 
 display(HTML(helper.formatiere_charter(projekt)))
@@ -424,18 +435,18 @@ def cells():
         *[factor_def_cell(**kw) for kw in FACTOR_DEFAULTS],
         colab_code("📋 Faktoren übernehmen", _DEFINE_06B_FAKTOREN_UEBERNEHMEN),
         md(_DEFINE_06C_VERMESSUNG_INTRO),
-        colab_code("🎯 Min-Einstellung eintragen", _DEFINE_06D_VERMESSUNG_MIN_EINSTELLUNG),
-        colab_code("🎯 Min-Würfe eintragen", _DEFINE_06D_VERMESSUNG_MIN_WUERFE),
-        colab_code("🎯 Max-Einstellung eintragen", _DEFINE_06E_VERMESSUNG_MAX_EINSTELLUNG),
-        colab_code("🎯 Max-Würfe eintragen", _DEFINE_06E_VERMESSUNG_MAX_WUERFE),
+        colab_code("📝 Min-Einstellung eintragen", _DEFINE_06D_VERMESSUNG_MIN_EINSTELLUNG),
+        colab_code("📝 Min-Würfe eintragen", _DEFINE_06D_VERMESSUNG_MIN_WUERFE),
+        colab_code("📝 Max-Einstellung eintragen", _DEFINE_06E_VERMESSUNG_MAX_EINSTELLUNG),
+        colab_code("📝 Max-Würfe eintragen", _DEFINE_06E_VERMESSUNG_MAX_WUERFE),
         colab_code("📊 Vermessung anzeigen", _DEFINE_06F_VERMESSUNG_ANZEIGE),
         md(_DEFINE_06G_ZIELWEITE_ANPASSEN),
-        colab_code("🎯 Zielweite anpassen (optional)", _DEFINE_06H_ZIELWEITE_SET),
+        colab_code("🎯 Zielweite festlegen", _DEFINE_06H_ZIELWEITE_SET),
         md(_DEFINE_06I_ANNAEHERUNG_INTRO),
-        colab_code("🎯 Annäherung: Einstellung eintragen", _DEFINE_06J_ANNAEHERUNG_EINSTELLUNG),
-        colab_code("🎯 Annäherung: 3 Würfe eintragen", _DEFINE_06J_ANNAEHERUNG_WUERFE),
-        colab_code("✅ Typische Einstellung übernehmen", _DEFINE_06K_TYPISCHE_EINSTELLUNG),
-        colab_code("🎯 Eure Zielweite", _DEFINE_07_TITLE_EURE_ZIELWEITE),
+        colab_code("📝 Annäherung: Einstellung eintragen", _DEFINE_06J_ANNAEHERUNG_EINSTELLUNG),
+        colab_code("📝 Annäherung: Würfe eintragen", _DEFINE_06J_ANNAEHERUNG_WUERFE),
+        colab_code("📋 Typische Einstellung übernehmen", _DEFINE_06K_TYPISCHE_EINSTELLUNG),
+        colab_code("📊 Status vor den Testwürfen", _DEFINE_07_TITLE_STATUS_VOR_TESTWUERFEN),
         md(_DEFINE_08_TESTW_RFE_DURCHF_HREN),
         colab_code("📝 Testwürfe eingeben", _DEFINE_09_TITLE_TESTW_RFE_EINGEBEN),
         colab_code("📊 Testwurf-Auswertung", _DEFINE_10_TITLE_TESTWURF_AUSWERTUNG),

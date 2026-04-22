@@ -8,7 +8,17 @@ _IMPROVE_55_X = r"""---
 
 ## Optimale Einstellung finden und bestätigen
 
-Das Modell sagt euch, welche Faktoren wichtig sind. Jetzt nutzen wir es, um die **optimale Einstellung** für eure Zielweite zu finden."""
+Das Modell sagt euch, welche Faktoren wichtig sind. Jetzt nutzt ihr es, um die **optimale Einstellung** für eure Zielweite zu finden.
+
+**Schritt 1:** Antwortfläche visuell erkunden (Konturplots)
+**Schritt 2:** Optimale Einstellungen analytisch berechnen
+**Schritt 3:** Konfirmation — Würfe an der neuen Einstellung"""
+
+_IMPROVE_55_SCHRITT1 = r"""## Schritt 1 – Antwortfläche visuell erkunden"""
+
+_IMPROVE_55_SCHRITT2 = r"""## Schritt 2 – Optimale Einstellungen berechnen"""
+
+_IMPROVE_55_SCHRITT3 = r"""## Schritt 3 – Konfirmation"""
 
 _IMPROVE_56_TITLE_KONTURPLOT_WURFWEITE = r"""faktor_x = 1 #@param {type:"integer"}
 faktor_y = 2 #@param {type:"integer"}
@@ -23,15 +33,16 @@ print(f"\nGewählt: X-Achse = {_fn[faktor_x - 1]}, Y-Achse = {_fn[faktor_y - 1]}
 if faktor_x == faktor_y:
     print("❌ Bitte zwei verschiedene Faktoren wählen!")
 else:
+    _fak = helper._effektive_faktoren(projekt)
     fig = helper.plot_kontur(
-        projekt.modell, projekt.faktoren, projekt.zielweite,
+        projekt.modell, _fak, projekt.zielweite,
         faktor_idx=(faktor_x - 1, faktor_y - 1)
     )
     helper._save_fig(projekt, fig, f"improve_kontur_{_fn[faktor_x-1]}_{_fn[faktor_y-1]}")
     plt.show()
 """
 
-_IMPROVE_57_VARIANZ_KONTURPLOTS = r"""## 📊 Varianz-Konturplots
+_IMPROVE_57_VARIANZ_KONTURPLOTS = r"""### 📊 Varianz-Konturplots
 
 Der Konturplot oben zeigt, **wo** ihr eure Zielweite trefft (Mittelwert). Aber wo ist der Prozess auch **konsistent**?
 
@@ -53,7 +64,7 @@ if faktor_x != faktor_y:
 
     fig = helper.plot_kontur_varianz_dispersion(
         projekt.modell, _doe_X, _doe_response,
-        projekt.faktoren,
+        helper._effektive_faktoren(projekt),
         faktor_idx=(faktor_x - 1, faktor_y - 1)
     )
     helper._save_fig(projekt, fig, f"improve_varianz_disp_{_fn[faktor_x-1]}_{_fn[faktor_y-1]}")
@@ -71,7 +82,7 @@ print(f"Gewählt: X={_fn[faktor_x-1]}, Y={_fn[faktor_y-1]}")
 
 if faktor_x != faktor_y:
     fig = helper.plot_kontur_varianz_transmitted(
-        projekt.modell, projekt.faktoren,
+        projekt.modell, helper._effektive_faktoren(projekt),
         faktor_idx=(faktor_x - 1, faktor_y - 1)
     )
     helper._save_fig(projekt, fig, f"improve_varianz_trans_{_fn[faktor_x-1]}_{_fn[faktor_y-1]}")
@@ -85,7 +96,7 @@ strategie = "dual" #@param ["mittelwert", "varianz", "dual"] {type:"string"}
 lambda_gewicht = 0.01 #@param {type:"number"}
 
 projekt.optimale_einstellung = helper.optimiere_einstellungen(
-    projekt.modell, projekt.zielweite, projekt.faktoren,
+    projekt.modell, projekt.zielweite, helper._effektive_faktoren(projekt),
     strategie=strategie, lambda_gewicht=lambda_gewicht
 )
 helper.zeige_optimierung(projekt.optimale_einstellung)
@@ -97,7 +108,7 @@ projekt.optimierung_config = {
 helper.speichere_fortschritt(projekt)
 """
 
-_IMPROVE_61_TITLE_REGRESSIONSFORMEL_ANZEIG = r"""helper.zeige_regressionsformel(projekt.modell, projekt.faktoren)"""
+_IMPROVE_61_TITLE_REGRESSIONSFORMEL_ANZEIG = r"""helper.zeige_regressionsformel(projekt.modell, helper._effektive_faktoren(projekt))"""
 
 _IMPROVE_62_PROGNOSETOOL = r"""### 🔮 Prognosetool
 
@@ -112,7 +123,8 @@ _IMPROVE_63_TITLE_PROGNOSETOOL_WURFWEITE_V = r"""import ipywidgets as _widgets
 # Slider pro Faktor erzeugen
 _faktor_sliders = []
 _slider_box = []
-for _f in projekt.faktoren:
+_fak_prog = helper._effektive_faktoren(projekt)
+for _f in _fak_prog:
     _center = (_f["low"] + _f["high"]) / 2
     _half = (_f["high"] - _f["low"]) / 2
     _slider = _widgets.FloatSlider(
@@ -142,13 +154,13 @@ def _berechne_prognose(_btn):
     _output.clear_output()
     with _output:
         werte = {}
-        for _f, _s in zip(projekt.faktoren, _faktor_sliders):
+        for _f, _s in zip(_fak_prog, _faktor_sliders):
             werte[_f["name"]] = _s.value
         ergebnis = helper.prognostiziere(
-            projekt.modell, projekt.faktoren, werte
+            projekt.modell, _fak_prog, werte
         )
         helper.zeige_prognose(
-            ergebnis, projekt.faktoren, werte,
+            ergebnis, _fak_prog, werte,
             zielweite=projekt.zielweite
         )
 
@@ -271,10 +283,10 @@ _IMPROVE_70_TITLE_KONFIRMATION_AUSWERTEN = r"""if len(projekt.konfirmation_wuerf
     projekt.konfirmation_ergebnis = ergebnis
     helper.zeige_konfirmation(ergebnis)
 
-    # Zielscheibe
+    # Zielscheibe (1D: nur Weite)
     fig = helper.plot_zielscheibe(
         projekt.konfirmation_wuerfe, projekt.zielweite, projekt.toleranz,
-        modus=projekt.messmodus, titel="Konfirmation – Optimierte Einstellung",
+        modus="1D", titel="Konfirmation – Optimierte Einstellung",
         farbe=helper.GREEN
     )
     helper._save_fig(projekt, fig, "improve_konfirmation_zielscheibe")
@@ -286,11 +298,13 @@ _IMPROVE_70_TITLE_KONFIRMATION_AUSWERTEN = r"""if len(projekt.konfirmation_wuerf
 def cells():
     return [
         md(_IMPROVE_55_X),
+        md(_IMPROVE_55_SCHRITT1),
         colab_code("📊 Konturplot (Wurfweite)", _IMPROVE_56_TITLE_KONTURPLOT_WURFWEITE),
         md(_IMPROVE_57_VARIANZ_KONTURPLOTS),
         colab_code("📊 Varianz-Konturplot: Dispersionsmodell", _IMPROVE_58_TITLE_VARIANZ_KONTURPLOT_DISPE),
         colab_code("📊 Varianz-Konturplot: Fehlerfortpflanzung", _IMPROVE_59_TITLE_VARIANZ_KONTURPLOT_FEHLE),
-        colab_code("🎯 Optimale Einstellungen berechnen (analytisch)", _IMPROVE_60_TITLE_OPTIMALE_EINSTELLUNGEN_B),
+        md(_IMPROVE_55_SCHRITT2),
+        colab_code("🎯 Optimale Einstellungen berechnen", _IMPROVE_60_TITLE_OPTIMALE_EINSTELLUNGEN_B),
         colab_code("📐 Regressionsformel anzeigen", _IMPROVE_61_TITLE_REGRESSIONSFORMEL_ANZEIG),
         md(_IMPROVE_62_PROGNOSETOOL),
         colab_code("🔮 Prognosetool: Wurfweite vorhersagen", _IMPROVE_63_TITLE_PROGNOSETOOL_WURFWEITE_V),
@@ -298,8 +312,9 @@ def cells():
         colab_code("📊 Vergleich: Alle drei Optimierungsstrategien", _IMPROVE_65_TITLE_VERGLEICH_ALLE_DREI_OPTI),
         md(_IMPROVE_66_ROBUSTHEITSHINWEIS_SUCHT_EINST),
         md(_IMPROVE_67_DETAILS_STYLE_MARGIN_10PX_0_PA),
+        md(_IMPROVE_55_SCHRITT3),
         colab_code("📥 Konfirmations-Template herunterladen", _IMPROVE_68_TITLE_KONFIRMATIONS_TEMPLATE_H),
-        colab_code("📝 Konfirmationswürfe eingeben (Weite in cm)", _IMPROVE_69_TITLE_KONFIRMATIONSW_RFE_EINGE),
+        colab_code("📝 Konfirmationswürfe eingeben", _IMPROVE_69_TITLE_KONFIRMATIONSW_RFE_EINGE),
         colab_code("📊 Konfirmation auswerten", _IMPROVE_70_TITLE_KONFIRMATION_AUSWERTEN),
         phase_export_cell("IMPROVE"),
     ]

@@ -4,16 +4,22 @@ from __future__ import annotations
 from .cells import code, colab_code, md, phase_export_cell
 
 _ANALYZE_32_X = r"""---
-# Phase 3: ANALYZE – Planung
+# Phase 3: ANALYZE
 
 ## Welche Faktoren beeinflussen die Wurfweite?
 
-Die Faktoren habt ihr in DEFINE bereits festgelegt. Hier **verfeinert** ihr sie für das DoE: Welche Faktoren sollen in den Versuchsplan, und bei welchen sind Centerpoints (mittlere Stufe) sinnvoll?
+Die Faktoren habt ihr in DEFINE bereits festgelegt. Hier **verfeinert** ihr sie für das DoE und führt die Versuche durch.
 
 **Schritt 1:** Faktoren für das DoE verfeinern (Teilmenge + Centerpoint-Entscheidung)
-**Schritt 2:** Versuchsplan generieren
-**Schritt 3:** Versuche durchführen
-**Schritt 4:** Modell auswerten"""
+**Schritt 2:** Versuchsplan generieren und als Excel herunterladen
+**Schritt 3:** Versuche durchführen und Ergebnisse hochladen
+**Schritt 4:** Regressionsmodell berechnen und bewerten"""
+
+_ANALYZE_32_SCHRITT1 = r"""## Schritt 1 – Faktoren fürs DoE verfeinern"""
+
+_ANALYZE_32_SCHRITT2 = r"""## Schritt 2 – Versuchsplan generieren"""
+
+_ANALYZE_32_SCHRITT4 = r"""## Schritt 4 – Regressionsmodell auswerten"""
 
 _ANALYZE_33_FAKTOREN_VERFEINERN = r'''# Aktive Faktoren und Centerpoint-Entscheidung (vorbelegt aus DEFINE)
 faktor1_aktiv = True if len(projekt.faktoren) > 0 else False #@param {type:"boolean"}
@@ -152,7 +158,7 @@ except ImportError:
 """
 
 _ANALYZE_41_X = r"""---
-## ⏱️ Versuchsdurchführung
+## Schritt 3 – Versuche durchführen
 
 Jetzt geht es los! Führt die Versuche in der **randomisierten Reihenfolge** aus dem Excel durch.
 
@@ -169,9 +175,7 @@ Jetzt geht es los! Führt die Versuche in der **randomisierten Reihenfolge** aus
 > 📋 **Für den Bericht:** Dokumentiert besondere Vorkommnisse (Katapult-Probleme, Ausreißer-Würfe, etc.)"""
 
 _ANALYZE_42_X = r"""---
-# Phase 3: ANALYZE – Auswertung
-
-## Was sagen die Daten?
+## Schritt 4 – Regressionsmodell berechnen und bewerten
 
 Bevor ihr die Ergebnisse seht, hier die drei wichtigsten Werkzeuge:
 
@@ -224,10 +228,17 @@ _ANALYZE_44_TITLE_REGRESSIONSMODELL_BERECH = r"""try:
     if projekt.doe_ergebnisse is not None:
         _fak_excel = helper._parse_faktoren_aus_excel(projekt.doe_ergebnisse)
 
-    if _fak_excel and helper._effektive_faktoren(projekt):
+    _vorher_cp = {f["name"]: f.get("centerpoint_moeglich", True)
+                  for f in helper._effektive_faktoren(projekt)}
+
+    if _fak_excel and _vorher_cp:
         helper.pruefe_excel_faktoren_konsistenz(projekt, _fak_excel)
 
     if _fak_excel:
+        # Excel-Parser trägt centerpoint_moeglich nicht mit — aus DEFINE/ANALYZE
+        # übernehmen, damit stetige/zweistufige Unterscheidung nicht verloren geht.
+        for f in _fak_excel:
+            f["centerpoint_moeglich"] = _vorher_cp.get(f["name"], True)
         projekt.faktoren_doe = _fak_excel
         print(f"ℹ️ {len(_fak_excel)} Faktoren aus Excel übernommen:")
         for f in _fak_excel:
@@ -341,7 +352,9 @@ _ANALYZE_53_DIV_STYLE_PADDING_10PX_BORDER = r"""<div style="padding:10px; border
 def cells():
     return [
         md(_ANALYZE_32_X),
+        md(_ANALYZE_32_SCHRITT1),
         colab_code("🧩 Faktoren für das DoE verfeinern", _ANALYZE_33_FAKTOREN_VERFEINERN),
+        md(_ANALYZE_32_SCHRITT2),
         colab_code("⚙️ Versuchsplan generieren", _ANALYZE_38_TITLE_VERSUCHSPLAN_GENERIEREN),
         md(_ANALYZE_39_DETAILS_STYLE_MARGIN_10PX_0_PA),
         colab_code("📥 Versuchsplan als Excel herunterladen", _ANALYZE_40_TITLE_VERSUCHSPLAN_ALS_EXCEL_H),
