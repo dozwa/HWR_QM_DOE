@@ -238,13 +238,14 @@ Bevor ihr die Messsystemanalyse macht, **sucht manuell** eine Einstellung, mit d
 
 **Spielregeln:**
 1. Ändert pro Iteration **immer nur einen einzigen Faktor** ("one factor at a time" / OFAT).
-2. Werft 3× und tragt die Werte ein.
-3. Führt die Zelle erneut aus — das Notebook protokolliert die Iterationen und warnt, falls ihr mehr als einen Faktor verändert habt.
-4. Wenn ihr zufrieden seid, übernehmt die Einstellung mit der Zelle „✅ Typische Einstellung übernehmen" — sie ist ab dann die Referenzeinstellung für Testwürfe und MEASURE-Baseline."""
+2. Tragt die Einstellung in der ersten Zelle ein und führt sie aus — das Notebook zeigt die Einstellung und warnt, falls mehr als ein Faktor gegenüber der letzten Iteration geändert wurde.
+3. Werft 3× und tragt die Weiten in der zweiten Zelle ein. Die Iteration wird dort protokolliert.
+4. Für die nächste Iteration: Einstellung anpassen, Zellen erneut ausführen.
+5. Wenn ihr zufrieden seid, übernehmt die Einstellung mit der Zelle „✅ Typische Einstellung übernehmen" — sie ist ab dann die Referenzeinstellung für Testwürfe und MEASURE-Baseline."""
 
-_DEFINE_06J_ANNAEHERUNG_ITERATION = r'''helper.zeige_faktoren_legende(projekt)
+_DEFINE_06J_ANNAEHERUNG_EINSTELLUNG = r'''helper.zeige_faktoren_legende(projekt)
 
-# Aktuelle Einstellung für diese Iteration (ein Wert pro Faktor, Reihenfolge 1..5).
+# Einstellung für die **nächste** Iteration (ein Wert pro Faktor, Reihenfolge 1..5).
 # Ändert pro Durchlauf bitte nur *einen* Faktor gegenüber der letzten Iteration.
 cur_val_1 = 0.0 #@param {type:"number"}
 cur_val_2 = 0.0 #@param {type:"number"}
@@ -252,19 +253,45 @@ cur_val_3 = 0.0 #@param {type:"number"}
 cur_val_4 = 0.0 #@param {type:"number"}
 cur_val_5 = 0.0 #@param {type:"number"}
 
-# Drei Würfe mit dieser Einstellung.
+_cur_vals = [cur_val_1, cur_val_2, cur_val_3, cur_val_4, cur_val_5]
+aktuelle_annaeherung = {f["name"]: _cur_vals[i]
+                         for i, f in enumerate(projekt.faktoren)
+                         if _cur_vals[i] != 0.0}
+
+if aktuelle_annaeherung:
+    print("✅ Einstellung für diese Iteration:")
+    for name, val in aktuelle_annaeherung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+    # OFAT-Vorschau gegen letzte Iteration
+    if projekt.annaeherung_log:
+        _vorher = projekt.annaeherung_log[-1]["einstellung"]
+        _geaendert = [n for n, v in aktuelle_annaeherung.items()
+                      if n in _vorher and float(v) != float(_vorher[n])]
+        if len(_geaendert) > 1:
+            print(f"⚠️ OFAT-Vorschau: {len(_geaendert)} Faktoren unterscheiden sich von "
+                  f"der letzten Iteration ({', '.join(_geaendert)}). Für einen "
+                  f"sauberen OFAT-Ansatz sollte nur einer davon geändert werden.")
+else:
+    print("⚠️ Bitte für mindestens einen Faktor einen Wert (>0) eintragen.")
+'''
+
+_DEFINE_06J_ANNAEHERUNG_WUERFE = r'''# Drei Würfe mit der oben gesetzten Einstellung.
 iter_wurf_1 = 0.0 #@param {type:"number"}
 iter_wurf_2 = 0.0 #@param {type:"number"}
 iter_wurf_3 = 0.0 #@param {type:"number"}
 
-_cur_vals = [cur_val_1, cur_val_2, cur_val_3, cur_val_4, cur_val_5]
-_einstellung = {f["name"]: _cur_vals[i]
-                for i, f in enumerate(projekt.faktoren)
-                if _cur_vals[i] != 0.0}
 _iter_wuerfe = [iter_wurf_1, iter_wurf_2, iter_wurf_3]
 
-if _einstellung and any(w > 0 for w in _iter_wuerfe):
-    helper.protokolliere_annaeherung(projekt, _einstellung, _iter_wuerfe)
+if "aktuelle_annaeherung" not in globals() or not aktuelle_annaeherung:
+    print("⚠️ Noch keine Einstellung festgelegt — führt zuerst "
+          "'Annäherung: Einstellung eintragen' aus.")
+elif any(w > 0 for w in _iter_wuerfe):
+    print("Würfe mit dieser Einstellung:")
+    for name, val in aktuelle_annaeherung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+    helper.protokolliere_annaeherung(projekt, aktuelle_annaeherung, _iter_wuerfe)
 elif projekt.annaeherung_log:
     print(f"ℹ️ Bisher {len(projekt.annaeherung_log)} Iteration(en) protokolliert.")
     for eintrag in projekt.annaeherung_log[-3:]:
@@ -272,7 +299,7 @@ elif projekt.annaeherung_log:
         print(f"   Iter {eintrag['iteration']}: μ={eintrag['mean']:.1f} cm "
               f"(Abweichung: {abw:+.1f} cm)")
 else:
-    print("⚠️ Bitte alle Faktor-Einstellungen und mindestens einen Wurf (>0) eingeben.")
+    print("⚠️ Bitte mindestens einen Wurf (>0) eingeben.")
 '''
 
 _DEFINE_06K_TYPISCHE_EINSTELLUNG = r"""# Übernimmt die letzte Annäherungs-Iteration als 'typische Einstellung'.
@@ -405,7 +432,8 @@ def cells():
         md(_DEFINE_06G_ZIELWEITE_ANPASSEN),
         colab_code("🎯 Zielweite anpassen (optional)", _DEFINE_06H_ZIELWEITE_SET),
         md(_DEFINE_06I_ANNAEHERUNG_INTRO),
-        colab_code("🎯 Annäherung: Einstellung + 3 Würfe", _DEFINE_06J_ANNAEHERUNG_ITERATION),
+        colab_code("🎯 Annäherung: Einstellung eintragen", _DEFINE_06J_ANNAEHERUNG_EINSTELLUNG),
+        colab_code("🎯 Annäherung: 3 Würfe eintragen", _DEFINE_06J_ANNAEHERUNG_WUERFE),
         colab_code("✅ Typische Einstellung übernehmen", _DEFINE_06K_TYPISCHE_EINSTELLUNG),
         colab_code("🎯 Eure Zielweite", _DEFINE_07_TITLE_EURE_ZIELWEITE),
         md(_DEFINE_08_TESTW_RFE_DURCHF_HREN),
