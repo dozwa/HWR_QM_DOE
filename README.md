@@ -21,20 +21,22 @@ scripts/notebook_builder/      # Phasen-Module (intro, define, measure, analyze,
 
 ### 1. DEFINE
 - **Faktoren festlegen:** bis zu 5 Katapult-Einstellungen (Name, Einheit, Low/High, Centerpoint-Flag)
-- **Katapult-Vermessung:** je 3 Würfe bei Min- und Max-Konfiguration, pro Faktor dokumentierter Einstellwert → realistische Reichweiten-Spanne
+- **Katapult-Vermessung:** je eine eigene Eingabezelle für **Einstellung** und **Würfe** auf Min- und Max-Seite (3 Würfe je Konfiguration) → realistische Reichweiten-Spanne
 - **Zielweite:** vom Nutzer festgelegt (Default 300 cm), Plausibilitätsprüfung gegen die gemessene Spanne
-- 5 Testwürfe bei typischer Einstellung mit CV-Bewertung
-- Projektcharter als strukturiertes Formular
+- **Manuelle Annäherung (OFAT):** Studierende finden iterativ eine Einstellung, mit der sie die Zielweite treffen — pro Iteration darf nur *ein* Faktor geändert werden (Notebook warnt bei Verstoß). Die finalisierte Einstellung wird als **typische Einstellung** übernommen.
+- 5 Testwürfe mit dieser typischen Einstellung, CV-Bewertung
+- Projektcharter als strukturiertes Formular (inkl. typischer Einstellung)
 
 ### 2. MEASURE
 - **MSA Type-1:** Bias und Repeatability je messende Person
 - **Gage R&R (ANOVA, AIAG-konform):** Varianzzerlegung in Repeatability, Reproducibility und Interaktion; %GRR-Bewertung
-- **Baseline:** 10–15 Würfe mit Histogramm, Normalverteilungskurve und Shapiro-Wilk-Test
+- **Baseline:** 10–15 Würfe mit der in DEFINE festgelegten typischen Einstellung; Histogramm, Normalverteilungskurve und Shapiro-Wilk-Test
 - Excel-Template-Generierung für die Datenerfassung
 
 ### 3. ANALYZE
 - **Faktoren verfeinern:** aus der in DEFINE festgelegten Liste Teilmenge wählen und Centerpoint-Flag je Faktor anpassen
 - **Design of Experiments:** Voll-, halb- und viertelfaktoriell (2^k) mit Blocking, Centerpoints und Randomisierung
+- **Konsistenzprüfung beim Upload:** die Faktor-Namen/-Stufen in der hochgeladenen DoE-Excel werden gegen die in DEFINE/ANALYZE eingetragenen geprüft und Abweichungen gemeldet; maßgeblich für die Auswertung sind die Excel-Werte, weil dort die tatsächlichen Messbedingungen stehen
 - **OLS-Regression:** Haupteffekte + Zweifach-Interaktionen
 - **Hierarchisches Pruning:** Backward Elimination mit Hierarchie-Schutz (signifikante Interaktion schützt zugehörige Haupteffekte)
 - Pareto-Diagramm, Koeffiziententabelle, R²-Bewertung

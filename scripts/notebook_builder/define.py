@@ -109,54 +109,70 @@ Ermittelt die **Reichweiten-Spanne** eures Katapults:
 
 > So erhaltet ihr einen realistischen Bereich, in dem ihr gleich die Zielweite festlegt, und eine reproduzierbare Katapult-Beschreibung."""
 
-_DEFINE_06D_VERMESSUNG_MIN = r'''# Einstellungen bei Min-Konfiguration (pro Faktor)
-# Trage hier die tatsächlich eingestellten Werte ein. Wenn du 0 stehen lässt,
-# wird der Low-Wert aus der Faktor-Definition übernommen.
+_DEFINE_06D_VERMESSUNG_MIN_EINSTELLUNG = r'''helper.zeige_faktoren_legende(projekt)
+
+# Min-Einstellung: tatsächlich eingestellte Werte pro Faktor (Reihenfolge 1..5).
+# Lass 0 stehen, wenn du den Low-Wert aus der Faktor-Definition übernehmen willst.
 min_val_1 = 0.0 #@param {type:"number"}
 min_val_2 = 0.0 #@param {type:"number"}
 min_val_3 = 0.0 #@param {type:"number"}
 min_val_4 = 0.0 #@param {type:"number"}
 min_val_5 = 0.0 #@param {type:"number"}
 
-# Drei Würfe bei Min-Konfiguration
-min_wurf_1 = 0.0 #@param {type:"number"}
-min_wurf_2 = 0.0 #@param {type:"number"}
-min_wurf_3 = 0.0 #@param {type:"number"}
-
 _min_vals_raw = [min_val_1, min_val_2, min_val_3, min_val_4, min_val_5]
 _min_einst = {}
 for i, f in enumerate(projekt.faktoren):
     _min_einst[f["name"]] = _min_vals_raw[i] if _min_vals_raw[i] != 0.0 else f["low"]
-_min_wuerfe = [min_wurf_1, min_wurf_2, min_wurf_3]
 
+helper.speichere_vermessung(
+    projekt,
+    min_wuerfe=[],
+    max_wuerfe=[],
+    min_einstellung=_min_einst,
+    max_einstellung={},
+)
+print("✅ Min-Einstellung gespeichert:")
+for name, val in _min_einst.items():
+    einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+    print(f"   • {name}: {val} {einheit}")
+'''
+
+_DEFINE_06D_VERMESSUNG_MIN_WUERFE = r'''if projekt.vermessung_min_einstellung:
+    print("Aktuelle Min-Einstellung:")
+    for name, val in projekt.vermessung_min_einstellung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+
+# Drei Würfe mit der oben eingestellten Min-Konfiguration.
+min_wurf_1 = 0.0 #@param {type:"number"}
+min_wurf_2 = 0.0 #@param {type:"number"}
+min_wurf_3 = 0.0 #@param {type:"number"}
+
+_min_wuerfe = [min_wurf_1, min_wurf_2, min_wurf_3]
 if any(w > 0 for w in _min_wuerfe):
     helper.speichere_vermessung(
         projekt,
         min_wuerfe=_min_wuerfe,
         max_wuerfe=[],
-        min_einstellung=_min_einst,
+        min_einstellung={},
         max_einstellung={},
     )
-    print(f"✅ Min-Konfiguration gespeichert (μ={float(np.mean(projekt.vermessung_min_wuerfe)):.1f} cm).")
+    print(f"✅ Min-Würfe gespeichert (μ={float(np.mean(projekt.vermessung_min_wuerfe)):.1f} cm).")
 elif len(projekt.vermessung_min_wuerfe) > 0:
     print(f"ℹ️ Min-Würfe aus gespeichertem Fortschritt: μ={float(np.mean(projekt.vermessung_min_wuerfe)):.1f} cm.")
 else:
     print("⚠️ Bitte mindestens einen Min-Wurf eingeben (Wert > 0).")
 '''
 
-_DEFINE_06E_VERMESSUNG_MAX = r'''# Einstellungen bei Max-Konfiguration (pro Faktor)
-# Trage hier die tatsächlich eingestellten Werte ein. Wenn du 0 stehen lässt,
-# wird der High-Wert aus der Faktor-Definition übernommen.
+_DEFINE_06E_VERMESSUNG_MAX_EINSTELLUNG = r'''helper.zeige_faktoren_legende(projekt)
+
+# Max-Einstellung: tatsächlich eingestellte Werte pro Faktor (Reihenfolge 1..5).
+# Lass 0 stehen, wenn du den High-Wert aus der Faktor-Definition übernehmen willst.
 max_val_1 = 0.0 #@param {type:"number"}
 max_val_2 = 0.0 #@param {type:"number"}
 max_val_3 = 0.0 #@param {type:"number"}
 max_val_4 = 0.0 #@param {type:"number"}
 max_val_5 = 0.0 #@param {type:"number"}
-
-# Drei Würfe bei Max-Konfiguration
-max_wurf_1 = 0.0 #@param {type:"number"}
-max_wurf_2 = 0.0 #@param {type:"number"}
-max_wurf_3 = 0.0 #@param {type:"number"}
 
 beschreibung = "" #@param {type:"string"}
 
@@ -164,18 +180,42 @@ _max_vals_raw = [max_val_1, max_val_2, max_val_3, max_val_4, max_val_5]
 _max_einst = {}
 for i, f in enumerate(projekt.faktoren):
     _max_einst[f["name"]] = _max_vals_raw[i] if _max_vals_raw[i] != 0.0 else f["high"]
-_max_wuerfe = [max_wurf_1, max_wurf_2, max_wurf_3]
 
+helper.speichere_vermessung(
+    projekt,
+    min_wuerfe=[],
+    max_wuerfe=[],
+    min_einstellung={},
+    max_einstellung=_max_einst,
+    beschreibung=beschreibung,
+)
+print("✅ Max-Einstellung gespeichert:")
+for name, val in _max_einst.items():
+    einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+    print(f"   • {name}: {val} {einheit}")
+'''
+
+_DEFINE_06E_VERMESSUNG_MAX_WUERFE = r'''if projekt.vermessung_max_einstellung:
+    print("Aktuelle Max-Einstellung:")
+    for name, val in projekt.vermessung_max_einstellung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+
+# Drei Würfe mit der oben eingestellten Max-Konfiguration.
+max_wurf_1 = 0.0 #@param {type:"number"}
+max_wurf_2 = 0.0 #@param {type:"number"}
+max_wurf_3 = 0.0 #@param {type:"number"}
+
+_max_wuerfe = [max_wurf_1, max_wurf_2, max_wurf_3]
 if any(w > 0 for w in _max_wuerfe):
     helper.speichere_vermessung(
         projekt,
         min_wuerfe=[],
         max_wuerfe=_max_wuerfe,
         min_einstellung={},
-        max_einstellung=_max_einst,
-        beschreibung=beschreibung,
+        max_einstellung={},
     )
-    print(f"✅ Max-Konfiguration gespeichert (μ={float(np.mean(projekt.vermessung_max_wuerfe)):.1f} cm).")
+    print(f"✅ Max-Würfe gespeichert (μ={float(np.mean(projekt.vermessung_max_wuerfe)):.1f} cm).")
 elif len(projekt.vermessung_max_wuerfe) > 0:
     print(f"ℹ️ Max-Würfe aus gespeichertem Fortschritt: μ={float(np.mean(projekt.vermessung_max_wuerfe)):.1f} cm.")
 else:
@@ -192,24 +232,87 @@ _DEFINE_06H_ZIELWEITE_SET = r"""neue_zielweite = 300.0 #@param {type:"number"}
 helper.setze_zielweite(projekt, neue_zielweite)
 """
 
+_DEFINE_06I_ANNAEHERUNG_INTRO = r"""## Schritt 4 – Zielweite manuell anpeilen (OFAT)
+
+Bevor ihr die Messsystemanalyse macht, **sucht manuell** eine Einstellung, mit der ihr eure Zielweite erreicht.
+
+**Spielregeln:**
+1. Ändert pro Iteration **immer nur einen einzigen Faktor** ("one factor at a time" / OFAT).
+2. Werft 3× und tragt die Werte ein.
+3. Führt die Zelle erneut aus — das Notebook protokolliert die Iterationen und warnt, falls ihr mehr als einen Faktor verändert habt.
+4. Wenn ihr zufrieden seid, übernehmt die Einstellung mit der Zelle „✅ Typische Einstellung übernehmen" — sie ist ab dann die Referenzeinstellung für Testwürfe und MEASURE-Baseline."""
+
+_DEFINE_06J_ANNAEHERUNG_ITERATION = r'''helper.zeige_faktoren_legende(projekt)
+
+# Aktuelle Einstellung für diese Iteration (ein Wert pro Faktor, Reihenfolge 1..5).
+# Ändert pro Durchlauf bitte nur *einen* Faktor gegenüber der letzten Iteration.
+cur_val_1 = 0.0 #@param {type:"number"}
+cur_val_2 = 0.0 #@param {type:"number"}
+cur_val_3 = 0.0 #@param {type:"number"}
+cur_val_4 = 0.0 #@param {type:"number"}
+cur_val_5 = 0.0 #@param {type:"number"}
+
+# Drei Würfe mit dieser Einstellung.
+iter_wurf_1 = 0.0 #@param {type:"number"}
+iter_wurf_2 = 0.0 #@param {type:"number"}
+iter_wurf_3 = 0.0 #@param {type:"number"}
+
+_cur_vals = [cur_val_1, cur_val_2, cur_val_3, cur_val_4, cur_val_5]
+_einstellung = {f["name"]: _cur_vals[i]
+                for i, f in enumerate(projekt.faktoren)
+                if _cur_vals[i] != 0.0}
+_iter_wuerfe = [iter_wurf_1, iter_wurf_2, iter_wurf_3]
+
+if _einstellung and any(w > 0 for w in _iter_wuerfe):
+    helper.protokolliere_annaeherung(projekt, _einstellung, _iter_wuerfe)
+elif projekt.annaeherung_log:
+    print(f"ℹ️ Bisher {len(projekt.annaeherung_log)} Iteration(en) protokolliert.")
+    for eintrag in projekt.annaeherung_log[-3:]:
+        abw = eintrag["abweichung_vom_ziel"]
+        print(f"   Iter {eintrag['iteration']}: μ={eintrag['mean']:.1f} cm "
+              f"(Abweichung: {abw:+.1f} cm)")
+else:
+    print("⚠️ Bitte alle Faktor-Einstellungen und mindestens einen Wurf (>0) eingeben.")
+'''
+
+_DEFINE_06K_TYPISCHE_EINSTELLUNG = r"""# Übernimmt die letzte Annäherungs-Iteration als 'typische Einstellung'.
+# Diese Einstellung wird später für die Testwürfe und die MEASURE-Baseline
+# verwendet, damit die Daten konsistent auf denselben Parametern basieren.
+helper.setze_typische_einstellung(projekt)
+"""
+
 _DEFINE_07_TITLE_EURE_ZIELWEITE = r"""print(f"{'='*50}")
 print(f"  EURE AUFGABE")
 print(f"  Zielweite:  {projekt.zielweite:.0f} cm")
 print(f"  Toleranz:   ±{projekt.toleranz:.0f} cm")
 print(f"  Zielband:   [{projekt.zielweite - projekt.toleranz:.0f}, {projekt.zielweite + projekt.toleranz:.0f}] cm")
 print(f"{'='*50}")
-print(f"\nStellt euer Katapult auf eine typische Einstellung und macht 5 Testwürfe,")
-print(f"um ein erstes Gefühl für die Streuung (CV) zu bekommen.")"""
+if projekt.typische_einstellung:
+    print(f"\nTypische Einstellung aus der Annäherung:")
+    for name, val in projekt.typische_einstellung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+    print(f"\nMacht 5 Testwürfe mit genau dieser Einstellung.")
+else:
+    print(f"\nStellt euer Katapult auf eure typische Einstellung und macht 5 Testwürfe.")"""
 
-_DEFINE_08_TESTW_RFE_DURCHF_HREN = r"""## Schritt 4 – Testwürfe (CV bei typischer Einstellung)
+_DEFINE_08_TESTW_RFE_DURCHF_HREN = r"""## Schritt 5 – Testwürfe (CV bei typischer Einstellung)
 
-1. Stellt euer Katapult auf eine **typische Einstellung** (weder Min noch Max)
-2. Macht **5 Würfe** und messt die Wurfweite
-3. Tragt die Werte unten ein
+1. Katapult auf die oben angezeigte **typische Einstellung** bringen (aus der Annäherung).
+2. **5 Würfe** – Wurfweite messen (1D, nur die Weite).
+3. Werte unten eintragen.
 
-> ⚠️ Noch keine Optimierung – es geht hier um die Reproduzierbarkeit eurer aktuellen Einstellung."""
+> ⚠️ Noch keine Optimierung – es geht hier um die Reproduzierbarkeit eurer typischen Einstellung."""
 
-_DEFINE_09_TITLE_TESTW_RFE_EINGEBEN = r"""wurf_1 = 0.0 #@param {type:"number"}
+_DEFINE_09_TITLE_TESTW_RFE_EINGEBEN = r"""if projekt.typische_einstellung:
+    print("Werft mit dieser Einstellung:")
+    for name, val in projekt.typische_einstellung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+else:
+    print("⚠️ Hinweis: Noch keine typische Einstellung festgelegt — führt Schritt 4 zuerst aus.")
+
+wurf_1 = 0.0 #@param {type:"number"}
 wurf_2 = 0.0 #@param {type:"number"}
 wurf_3 = 0.0 #@param {type:"number"}
 wurf_4 = 0.0 #@param {type:"number"}
@@ -230,18 +333,6 @@ else:
 
 _DEFINE_10_TITLE_TESTWURF_AUSWERTUNG = r"""helper.zeige_testwurf_ergebnis(projekt)"""
 
-_DEFINE_11_TITLE_MESSMODUS_W_HLEN = r'''messmodus = "1D (nur Weite)" #@param ["1D (nur Weite)", "2D (Weite + Querversatz)"]
-projekt.messmodus = "2D" if "2D" in messmodus else "1D"
-print(f"✅ Messmodus: {projekt.messmodus}")
-if projekt.messmodus == "2D":
-    display(HTML("""
-    <div style="padding:10px; border-left:4px solid #EA580C; background:#FEF9C3; border-radius:4px;">
-        ⚠️ <strong>Hinweis:</strong> Bei 2D-Messung verdoppelt sich der Messaufwand pro Wurf.
-        Empfohlen nur für Gruppen, die seitliche Präzision einbeziehen wollen.
-    </div>"""))
-helper.speichere_fortschritt(projekt)
-'''
-
 _DEFINE_12_PROJEKTCHARTER = r"""### Projektcharter
 
 Die Projektcharter dokumentiert euer Qualitätsverbesserungsprojekt. Sie ist das zentrale Dokument der Define-Phase.
@@ -255,16 +346,19 @@ projektleiter = "" #@param {type:"string"}
 protokollant = "" #@param {type:"string"}
 versuchsdurchfuehrende = "" #@param {type:"string"}
 
+_einst_str = ", ".join(f"{n}={v}" for n, v in projekt.typische_einstellung.items()) \
+             if projekt.typische_einstellung else "(noch nicht festgelegt)"
 projekt.charter = {
     "Gruppenname": projekt.gruppenname,
     "Zielweite": f"{projekt.zielweite:.0f} cm ± {projekt.toleranz:.0f} cm",
+    "Typische Einstellung": _einst_str,
     "Problemstellung": problemstellung,
     "Projektziel": projektziel,
     "Scope": scope,
     "Projektleiter/in": projektleiter,
     "Protokollant/in": protokollant,
     "Versuchsdurchführende": versuchsdurchfuehrende,
-    "Datum": "23.04.2026",
+    "Datum": "22.04.2026",
 }
 
 display(HTML(helper.formatiere_charter(projekt)))
@@ -303,16 +397,20 @@ def cells():
         *[factor_def_cell(**kw) for kw in FACTOR_DEFAULTS],
         colab_code("📋 Faktoren übernehmen", _DEFINE_06B_FAKTOREN_UEBERNEHMEN),
         md(_DEFINE_06C_VERMESSUNG_INTRO),
-        colab_code("🎯 Min-Konfiguration eintragen", _DEFINE_06D_VERMESSUNG_MIN),
-        colab_code("🎯 Max-Konfiguration eintragen", _DEFINE_06E_VERMESSUNG_MAX),
+        colab_code("🎯 Min-Einstellung eintragen", _DEFINE_06D_VERMESSUNG_MIN_EINSTELLUNG),
+        colab_code("🎯 Min-Würfe eintragen", _DEFINE_06D_VERMESSUNG_MIN_WUERFE),
+        colab_code("🎯 Max-Einstellung eintragen", _DEFINE_06E_VERMESSUNG_MAX_EINSTELLUNG),
+        colab_code("🎯 Max-Würfe eintragen", _DEFINE_06E_VERMESSUNG_MAX_WUERFE),
         colab_code("📊 Vermessung anzeigen", _DEFINE_06F_VERMESSUNG_ANZEIGE),
         md(_DEFINE_06G_ZIELWEITE_ANPASSEN),
         colab_code("🎯 Zielweite anpassen (optional)", _DEFINE_06H_ZIELWEITE_SET),
+        md(_DEFINE_06I_ANNAEHERUNG_INTRO),
+        colab_code("🎯 Annäherung: Einstellung + 3 Würfe", _DEFINE_06J_ANNAEHERUNG_ITERATION),
+        colab_code("✅ Typische Einstellung übernehmen", _DEFINE_06K_TYPISCHE_EINSTELLUNG),
         colab_code("🎯 Eure Zielweite", _DEFINE_07_TITLE_EURE_ZIELWEITE),
         md(_DEFINE_08_TESTW_RFE_DURCHF_HREN),
         colab_code("📝 Testwürfe eingeben", _DEFINE_09_TITLE_TESTW_RFE_EINGEBEN),
         colab_code("📊 Testwurf-Auswertung", _DEFINE_10_TITLE_TESTWURF_AUSWERTUNG),
-        colab_code("📏 Messmodus wählen", _DEFINE_11_TITLE_MESSMODUS_W_HLEN),
         md(_DEFINE_12_PROJEKTCHARTER),
         colab_code("📝 Projektcharter ausfüllen", _DEFINE_13_TITLE_PROJEKTCHARTER_AUSF_LLEN),
         md(_DEFINE_14_DIV_STYLE_PADDING_10PX_BORDER),

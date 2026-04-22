@@ -217,16 +217,23 @@ helper.speichere_fortschritt(projekt)
 """
 
 _ANALYZE_44_TITLE_REGRESSIONSMODELL_BERECH = r"""try:
-    # Faktoren aus Excel erkennen, falls weder Master- noch DoE-Liste vorhanden
-    _fak = helper._effektive_faktoren(projekt)
-    if not _fak and projekt.doe_ergebnisse is not None:
-        _fak = helper._parse_faktoren_aus_excel(projekt.doe_ergebnisse)
-        projekt.faktoren_doe = _fak
-        if _fak:
-            print(f"ℹ️ {len(_fak)} Faktoren aus Excel erkannt:")
-            for f in _fak:
-                print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
+    # Konsistenzprüfung: Excel-Faktoren ggü. den in DEFINE/ANALYZE definierten.
+    # Maßgeblich für die Regression sind die Excel-Namen — das sind die
+    # tatsächlichen Bedingungen, unter denen gemessen wurde.
+    _fak_excel = []
+    if projekt.doe_ergebnisse is not None:
+        _fak_excel = helper._parse_faktoren_aus_excel(projekt.doe_ergebnisse)
 
+    if _fak_excel and helper._effektive_faktoren(projekt):
+        helper.pruefe_excel_faktoren_konsistenz(projekt, _fak_excel)
+
+    if _fak_excel:
+        projekt.faktoren_doe = _fak_excel
+        print(f"ℹ️ {len(_fak_excel)} Faktoren aus Excel übernommen:")
+        for f in _fak_excel:
+            print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
+
+    _fak = helper._effektive_faktoren(projekt)
     projekt.modell = helper.fitte_modell(projekt.doe_ergebnisse, _fak)
     print(f"✅ Modell berechnet!")
     print(f"   R² = {projekt.modell.rsquared:.4f}")

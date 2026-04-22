@@ -103,6 +103,10 @@ class Projekt:
     vermessung_min_einstellung: Dict[str, float] = field(default_factory=dict)
     vermessung_max_einstellung: Dict[str, float] = field(default_factory=dict)
     vermessung_beschreibung: str = ""
+    # Manuelle Annäherung an die Zielweite (OFAT): Protokoll der Iterationen +
+    # finalisierte typische Einstellung für Testwürfe und Baseline.
+    annaeherung_log: List[Dict] = field(default_factory=list)
+    typische_einstellung: Dict[str, float] = field(default_factory=dict)
 
     # MEASURE
     msa_type1: Optional[Dict] = None
@@ -360,10 +364,10 @@ def zeige_testwurf_ergebnis(projekt: Projekt):
     """Zeigt die Testwurf-Auswertung inkl. Zielscheibe und CV-Warnung."""
     stats = berechne_testwurf_statistik(projekt.testwuerfe)
 
-    # Zielscheibe
+    # Zielscheibe (1D-Modus: nur Weite)
     fig = plot_zielscheibe(
         projekt.testwuerfe, projekt.zielweite, projekt.toleranz,
-        modus=projekt.messmodus, titel="Testwürfe – Ist-Zustand"
+        modus="1D", titel="Testwürfe – Ist-Zustand"
     )
     _save_fig(projekt, fig, "define_testwuerfe")
     plt.show()
@@ -534,6 +538,145 @@ def setze_zielweite(projekt: Projekt, zielweite: float) -> None:
               f"(noch keine Min/Max-Vermessung zur Plausibilitätsprüfung vorhanden).")
 
     speichere_fortschritt(projekt)
+
+
+def zeige_faktoren_legende(projekt: Projekt) -> None:
+    """Druckt eine klar nummerierte Legende der in DEFINE gesetzten Faktoren.
+
+    Wird am Anfang aller Zellen aufgerufen, in denen der Student Werte oder
+    Würfe pro Faktor einträgt, damit die generischen Formularfelder (`wert_1`,
+    `wert_2` …) eindeutig zugeordnet werden können.
+    """
+    if not projekt.faktoren:
+        print("⚠️ Noch keine Faktoren definiert. Bitte zuerst Schritt 1 (Faktoren definieren) ausführen.")
+        return
+    lines = ["📋 Eure Faktoren aus Schritt 1 (Reihenfolge entspricht den Eingabefeldern):"]
+    for i, f in enumerate(projekt.faktoren, start=1):
+        lines.append(f"   {i}. {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
+    print("\n".join(lines))
+
+
+def protokolliere_annaeherung(projekt: Projekt,
+                              einstellung: Dict[str, float],
+                              wuerfe) -> None:
+    """Speichert eine Iteration der manuellen Annäherung (OFAT).
+
+    Führt eine "nur ein Faktor geändert"-Prüfung gegen den letzten Eintrag und
+    warnt bei Verletzung. Die Einstellung wird immer gespeichert — die
+    Studierenden entscheiden selbst, ob sie verworfen wird.
+    """
+    w = np.array([v for v in wuerfe if v and v > 0], dtype=float)
+    if len(w) == 0:
+        print("⚠️ Keine gültigen Würfe eingegeben (Werte > 0 erwartet).")
+        return
+
+    eintrag = {
+        "iteration": len(projekt.annaeherung_log) + 1,
+        "einstellung": dict(einstellung),
+        "wuerfe": w.tolist(),
+        "mean": float(w.mean()),
+        "abweichung_vom_ziel": float(w.mean() - projekt.zielweite),
+    }
+    projekt.annaeherung_log.append(eintrag)
+
+    # OFAT-Plausibilität: wie viele Faktoren haben sich vs. letzte Iteration geändert?
+    if len(projekt.annaeherung_log) >= 2:
+        vorher = projekt.annaeherung_log[-2]["einstellung"]
+        geaendert = [name for name, val in einstellung.items()
+                     if name in vorher and float(val) != float(vorher[name])]
+        if len(geaendert) > 1:
+            print(f"⚠️ OFAT-Hinweis: {len(geaendert)} Faktoren wurden gegenüber der letzten "
+                  f"Iteration verändert ({', '.join(geaendert)}). Für eine saubere "
+                  f"Annäherung solltet ihr pro Iteration nur **einen** Faktor verändern.")
+
+    diff = eintrag["abweichung_vom_ziel"]
+    print(f"✅ Iteration {eintrag['iteration']} protokolliert: μ={eintrag['mean']:.1f} cm "
+          f"(Abweichung zur Zielweite: {diff:+.1f} cm).")
+    speichere_fortschritt(projekt)
+
+
+def setze_typische_einstellung(projekt: Projekt,
+                               einstellung: Optional[Dict[str, float]] = None) -> None:
+    """Übernimmt eine Einstellung als "typisch" für Testwürfe und Baseline.
+
+    Wird ohne Argument aufgerufen, übernimmt sie die Einstellung der **letzten**
+    Annäherungs-Iteration. Sonst wird das übergebene Dict verwendet.
+    """
+    if einstellung is None:
+        if not projekt.annaeherung_log:
+            print("⚠️ Keine Annäherungs-Iteration vorhanden — bitte zuerst eine Iteration "
+                  "protokollieren oder Einstellung direkt übergeben.")
+            return
+        einstellung = projekt.annaeherung_log[-1]["einstellung"]
+
+    if not einstellung:
+        print("⚠️ Leere Einstellung — keine Änderung gespeichert.")
+        return
+
+    projekt.typische_einstellung = dict(einstellung)
+    print("✅ Typische Einstellung übernommen:")
+    for name, val in projekt.typische_einstellung.items():
+        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
+        print(f"   • {name}: {val} {einheit}")
+    speichere_fortschritt(projekt)
+
+
+def pruefe_excel_faktoren_konsistenz(projekt: Projekt,
+                                     excel_faktoren: List[Dict]) -> List[str]:
+    """Vergleicht die aus der DoE-Excel geparsten Faktoren mit projekt.faktoren_doe.
+
+    Zurück: Liste menschenlesbarer Diskrepanz-Meldungen (leer → alles konsistent).
+    Bei Abweichungen wird zusätzlich ein Hinweis angezeigt. Die Entscheidung,
+    welche Variante weitergenutzt wird, trifft der Aufrufer — im Notebook ist
+    das die Excel-Seite (weil dort die tatsächlichen Messungen herkommen).
+    """
+    meldungen: List[str] = []
+    referenz = _effektive_faktoren(projekt)
+    if not referenz:
+        return meldungen  # nichts zu vergleichen
+
+    ref_namen = [f["name"] for f in referenz]
+    excel_namen = [f["name"] for f in excel_faktoren]
+
+    # Zusätzliche / fehlende Faktoren
+    nur_excel = [n for n in excel_namen if n not in ref_namen]
+    nur_define = [n for n in ref_namen if n not in excel_namen]
+    for n in nur_excel:
+        meldungen.append(f"Faktor '{n}' in Excel vorhanden, aber nicht in DEFINE/ANALYZE definiert.")
+    for n in nur_define:
+        meldungen.append(f"Faktor '{n}' in DEFINE/ANALYZE definiert, aber nicht in Excel.")
+
+    # Stufen-Abweichungen auf gemeinsamen Faktoren
+    ref_map = {f["name"]: f for f in referenz}
+    for fx in excel_faktoren:
+        if fx["name"] not in ref_map:
+            continue
+        fr = ref_map[fx["name"]]
+        if abs(float(fx["low"]) - float(fr["low"])) > 1e-6:
+            meldungen.append(
+                f"Faktor '{fx['name']}': Low={fx['low']} in Excel vs. {fr['low']} in DEFINE."
+            )
+        if abs(float(fx["high"]) - float(fr["high"])) > 1e-6:
+            meldungen.append(
+                f"Faktor '{fx['name']}': High={fx['high']} in Excel vs. {fr['high']} in DEFINE."
+            )
+        if fx.get("einheit") and fr.get("einheit") and fx["einheit"] != fr["einheit"]:
+            meldungen.append(
+                f"Faktor '{fx['name']}': Einheit '{fx['einheit']}' in Excel vs. "
+                f"'{fr['einheit']}' in DEFINE."
+            )
+
+    if meldungen:
+        html = "<br>".join(f"• {m}" for m in meldungen)
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                     border-radius:4px; margin:8px 0;">
+            ⚠️ <strong>Abweichung zwischen Excel und Faktordefinition:</strong><br>
+            {html}<br>
+            <em>Die Excel-Werte sind maßgeblich, da die Messungen unter diesen Bedingungen
+            stattfanden.</em>
+        </div>"""))
+    return meldungen
 
 
 def formatiere_charter(projekt: Projekt) -> str:
@@ -3263,6 +3406,9 @@ def _projekt_to_dict(projekt: Projekt) -> dict:
     d["vermessung_min_einstellung"] = projekt.vermessung_min_einstellung
     d["vermessung_max_einstellung"] = projekt.vermessung_max_einstellung
     d["vermessung_beschreibung"] = projekt.vermessung_beschreibung
+    # Annäherung & typische Einstellung
+    d["annaeherung_log"] = _sanitize(projekt.annaeherung_log)
+    d["typische_einstellung"] = projekt.typische_einstellung
 
     # MSA
     if projekt.msa_type1 is not None:
@@ -3345,6 +3491,9 @@ def _dict_to_projekt(d: dict) -> Projekt:
     p.vermessung_min_einstellung = d.get("vermessung_min_einstellung", {})
     p.vermessung_max_einstellung = d.get("vermessung_max_einstellung", {})
     p.vermessung_beschreibung = d.get("vermessung_beschreibung", "")
+    # Annäherung & typische Einstellung
+    p.annaeherung_log = d.get("annaeherung_log", [])
+    p.typische_einstellung = d.get("typische_einstellung", {})
 
     # MSA
     p.msa_type1 = d.get("msa_type1")
@@ -3610,6 +3759,10 @@ def zeige_restore_zusammenfassung(projekt: Projekt):
         _min = float(np.mean(projekt.vermessung_min_wuerfe))
         _max = float(np.mean(projekt.vermessung_max_wuerfe))
         details.append(f"Katapult vermessen: {_min:.0f}–{_max:.0f} cm")
+    if projekt.annaeherung_log:
+        details.append(f"Annäherung: {len(projekt.annaeherung_log)} Iteration(en) protokolliert")
+    if projekt.typische_einstellung:
+        details.append(f"Typische Einstellung: {len(projekt.typische_einstellung)} Faktor(en) festgelegt")
     if len(projekt.testwuerfe) > 0:
         details.append(f"Testwürfe: {len(projekt.testwuerfe)} Stück "
                        f"(μ={np.mean(projekt.testwuerfe):.1f} cm)")

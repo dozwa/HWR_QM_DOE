@@ -31,6 +31,9 @@ Das `.ipynb` wird niemals direkt editiert. Zusätzlich: `helper.py` wird in Cola
 
 - **Faktoren werden in DEFINE definiert** (Felder `name, einheit, low, high, centerpoint_moeglich`) und in `projekt.faktoren` abgelegt. ANALYZE verfeinert diese Liste nur noch (Teilmenge auswählen, Centerpoints-Flag anpassen) und schreibt das Ergebnis in `projekt.faktoren_doe`. Nachfolgender DoE-Code liest `faktoren_doe` mit Fallback auf `faktoren`.
 - **Zielweite wird in DEFINE vom Nutzer eingetragen** (Default 300.0 cm). Keine Hash-/Random-Zuweisung mehr. Die Min/Max-Vermessung in DEFINE liefert den realistischen Bereich, innerhalb dessen die Zielweite sinnvoll liegt.
+- **Manuelle Annäherung (OFAT) in DEFINE**: `projekt.annaeherung_log` sammelt Iterationen; `projekt.typische_einstellung` ist die finalisierte Einstellung. Testwürfe (DEFINE) und Baseline (MEASURE) nutzen sie explizit.
+- **Nur 1D-Messung** (Wurfweite). Der historische `messmodus`-Switch ist entfernt.
+- **DoE-Upload**: `pruefe_excel_faktoren_konsistenz(projekt, excel_faktoren)` vergleicht die aus der Excel geparsten Faktoren mit `projekt.faktoren_doe`. Abweichungen werden gemeldet, dann überschreiben die Excel-Werte `faktoren_doe` — die Messungen kamen unter diesen Bedingungen zustande.
 - **USL/LSL** (Spec Limits, in CONTROL für Cpk) bleiben `zielweite ± toleranz`.
 
 ### Commands
