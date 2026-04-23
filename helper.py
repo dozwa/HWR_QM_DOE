@@ -2777,7 +2777,7 @@ def vergleiche_optimierungen(modell, zielweite: float, faktoren: List[Dict],
 
 def erstelle_konfirmation_excel(einstellungen: Dict, zielweite: float,
                                 output_path: str = "Konfirmation.xlsx") -> str:
-    """Erstellt die Konfirmations-Excel-Vorlage."""
+    """Erstellt die Konfirmations-Excel-Vorlage (nur Wurfweite)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
@@ -2804,26 +2804,58 @@ def erstelle_konfirmation_excel(einstellungen: Dict, zielweite: float,
         row += 1
     row += 1
 
-    # Datentabelle
-    headers = ["Wurf-ID", "Weite (cm)", "Querversatz (cm)"]
+    # Datentabelle (nur Wurfweite)
+    headers = ["Wurf-ID", "Weite (cm)"]
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=row, column=col_idx, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.border = thin_border
 
-    for i in range(1, 16):  # 15 Zeilen vorbereiten
+    for i in range(1, 21):  # 20 Zeilen vorbereiten
         data_row = row + i
         ws.cell(row=data_row, column=1, value=i).border = thin_border
         ws.cell(row=data_row, column=2).border = thin_border
-        ws.cell(row=data_row, column=3).border = thin_border
 
     ws.column_dimensions["A"].width = 12
     ws.column_dimensions["B"].width = 16
-    ws.column_dimensions["C"].width = 20
 
     wb.save(output_path)
     return os.path.abspath(output_path)
+
+
+def lade_konfirmation_aus_excel(filepath: str) -> np.ndarray:
+    """Liest Wurfweiten aus einer ausgefüllten Konfirmations-Excel.
+
+    Erwartet das vom ``erstelle_konfirmation_excel`` erzeugte Layout:
+    Nach den Metadatenzeilen folgt eine Header-Zeile mit mindestens
+    "Wurf-ID" und "Weite". Datenzeilen beginnen direkt darunter.
+    Leere Zellen werden ignoriert.
+    """
+    import openpyxl
+
+    wb = openpyxl.load_workbook(filepath, data_only=True)
+    ws = wb["Konfirmation"] if "Konfirmation" in wb.sheetnames else wb.active
+
+    # Header-Zeile finden (Zelle mit "Wurf-ID" in Spalte A)
+    header_row = None
+    for r in range(1, ws.max_row + 1):
+        val = ws.cell(row=r, column=1).value
+        if isinstance(val, str) and "wurf" in val.lower() and "id" in val.lower():
+            header_row = r
+            break
+    if header_row is None:
+        raise ValueError("Konnte Header-Zeile (Wurf-ID) in der Excel nicht finden.")
+
+    weiten: list = []
+    for r in range(header_row + 1, ws.max_row + 1):
+        wid = ws.cell(row=r, column=1).value
+        weite = ws.cell(row=r, column=2).value
+        if wid is None and weite is None:
+            continue
+        if isinstance(weite, (int, float)) and weite > 0:
+            weiten.append(float(weite))
+    return np.array(weiten)
 
 
 def analysiere_konfirmation(wuerfe: np.ndarray, vorhersage: float,

@@ -16,11 +16,19 @@ Willkommen zum zweiten QM-Tag! Heute durchlauft ihr den **kompletten DMAIC-Zyklu
 |-------|--------|-------|
 | Define | Zielweite, Testwürfe, Charter | 45 min |
 | Measure | MSA + Baseline | 75 min |
-| Analyze | DoE-Planung + Durchführung + Modell | ~4h |
+| Analyze | DoE-Planung + Durchführung + Modell | 1.5–3 h |
 | Improve | Optimierung + Konfirmation | 60 min |
 | Control | Kontrollkarte, Cpk, Vorher/Nachher | 30 min |
 
 ⚠️ **Wichtig:** Zellen der Reihe nach ausführen! Keine Zellen überspringen."""
+
+_INTRO_COLAB_HINWEIS = r"""> **💡 Hinweis zum Arbeiten mit Google Colab**
+>
+> - **Als Erstes: eigene Kopie speichern!** `Datei → Kopie in Drive speichern`. Nur in eurer Kopie bleiben eure Eingaben erhalten.
+> - **Regelmäßig speichern** (`Strg/Cmd + S`), falls Colab nicht automatisch speichert. Besonders vor langen Pausen.
+> - **Sessions können abbrechen** (Inaktivität, Timeout, Netzwerk). Dann gehen die *berechneten* Ergebnisse verloren – nicht aber eure Eingaben in den Formularfeldern.
+> - **Speicherung bedeutet:** Eure Eintragungen (Formularwerte, Zellinhalte) bleiben erhalten, aber die Zellen müssen bei einem Neustart erneut ausgeführt werden – ggf. von oben nach unten.
+> - **Auto-Speicherung auf Drive** (nächste Zelle) sichert zusätzlich eure Daten (`fortschritt.json`, Plots, Excel-Uploads) in `MyDrive/DMAIC_Katapult/<Gruppe>/` – so übersteht ihr auch einen harten Session-Abbruch."""
 
 _INTRO_01_TITLE_BIBLIOTHEKEN_INSTALLIERE = r"""!pip install -q statsmodels openpyxl
 print("✅ Alle Bibliotheken installiert!")
@@ -73,6 +81,7 @@ print("✅ Initialisierung abgeschlossen!")
 def cells():
     return [
         md(_INTRO_00_DMAIC_KATAPULT_VERSUCH),
+        md(_INTRO_COLAB_HINWEIS),
         colab_code("🔧 Bibliotheken installieren (einmalig ausführen)", _INTRO_01_TITLE_BIBLIOTHEKEN_INSTALLIERE),
         colab_code("🔧 Google Drive verbinden (für Auto-Speicherung)", _INTRO_02_TITLE_GOOGLE_DRIVE_VERBINDEN_F),
         md(_INTRO_03_AUTO_SPEICHERUNG_AKTIV_EUER_FO),

@@ -39,10 +39,11 @@ _MEASURE_20_MSA_DURCHF_HRUNG = r"""### MSA-Durchführung
 
 #### Übung B: Reproduzierbarkeit
 1. Macht **10 Würfe** mit identischen Katapult-Einstellungen
-2. Nach jedem Wurf: **Auftreffpunkt sofort markieren** (Kreppband)
-3. **Jede Person** misst unabhängig die Distanz zum Auftreffpunkt
-4. **Keine Kommunikation** während der Messung!
-5. Erst alle Messungen notiert → dann Markierung entfernen → nächster Wurf"""
+2. Nach jedem Wurf: **Auftreffpunkt sofort markieren** (Kreppband) und **erst dann** messen – **nicht** erst alle 10 werfen und danach gemeinsam messen!
+3. **Jede Person misst jeden Wurf unabhängig** und notiert ihren Wert **geheim auf einem eigenen Zettel** – noch nicht in die Excel-Tabelle!
+4. **Keine Kommunikation** während der Messung – kein Vergleichen, kein "Hast du auch…?", kein Blick auf den Zettel der anderen.
+5. Markierung entfernen → nächster Wurf → wieder alle unabhängig messen und notieren.
+6. **Erst am Ende**, wenn alle 10 Würfe gemessen sind, werden die **geheim notierten Werte** gemeinsam in die Excel-Tabelle übertragen."""
 
 _MEASURE_21_TITLE_MSA_TEMPLATE_HERUNTERLAD = r"""anzahl_personen = 3 #@param {type:"integer"}
 

@@ -221,7 +221,53 @@ except ImportError:
     print(f"📁 Datei: {filepath}")
 
 print(f"\n🎯 Stellt euer Katapult auf die empfohlenen Einstellungen und macht mindestens 10 Würfe!")
+print(f"   Tragt jede Wurfweite in die Spalte 'Weite (cm)' der Excel ein und ladet sie unten hoch.")
 """
+
+_IMPROVE_KONF_UPLOAD_INFO = r"""### Konfirmationswürfe hochladen
+
+Tragt eure Wurfweiten in die heruntergeladene **`Konfirmation.xlsx`** ein (Spalte *Weite (cm)*, mindestens 10 Würfe) und ladet die ausgefüllte Datei hier hoch. Das Notebook liest die Werte automatisch aus."""
+
+_IMPROVE_KONF_UPLOAD = r"""try:
+    from google.colab import files
+    print("⬆️ Bitte Konfirmation.xlsx (ausgefüllt) hochladen:")
+    uploaded = files.upload()
+    konf_file = list(uploaded.keys())[0]
+except ImportError:
+    konf_file = "Konfirmation.xlsx"
+
+try:
+    werte = helper.lade_konfirmation_aus_excel(konf_file)
+    if len(werte) > 0:
+        projekt.konfirmation_wuerfe = werte
+        print(f"✅ {len(werte)} Konfirmationswürfe aus Excel geladen")
+        print(f"   Werte: {list(np.round(werte, 1))}")
+
+        # Excel-Backup auf Drive speichern
+        import shutil
+        _save_dir = helper._fortschritt_verzeichnis(projekt)
+        if _save_dir:
+            os.makedirs(_save_dir, exist_ok=True)
+            shutil.copy2(konf_file, os.path.join(_save_dir, "Konfirmation.xlsx"))
+
+        helper.speichere_fortschritt(projekt)
+    else:
+        print("⚠️ Keine Wurfweiten in der Excel gefunden.")
+        print("   Prüft die Spalte 'Weite (cm)' oder nutzt den Fallback weiter unten.")
+except Exception as e:
+    print(f"❌ Fehler beim Einlesen der Excel: {e}")
+    print("   Nutzt den Fallback weiter unten (manuelle Eingabe).")
+"""
+
+_IMPROVE_KONF_FALLBACK_INFO = r"""<details style="margin:10px 0; padding:8px; background:#FEF3C7; border:1px solid #F59E0B; border-radius:6px;">
+<summary style="cursor:pointer; font-weight:bold; color:#92400E;">
+🛟 Fallback: Konfirmationswürfe manuell eingeben (nur wenn Excel-Upload nicht funktioniert)
+</summary>
+<div style="margin-top:8px; padding:8px; font-size:0.95em;">
+
+Falls der Upload scheitert (z.B. Browser-Problem, Colab-Session abgelaufen), könnt ihr die Würfe in der nächsten Zelle manuell eintragen. Sonst diesen Abschnitt einfach überspringen – die Excel-Variante ist der bevorzugte Weg.
+</div>
+</details>"""
 
 _IMPROVE_69_TITLE_KONFIRMATIONSW_RFE_EINGE = r"""wurf_01 = 0.0 #@param {type:"number"}
 wurf_02 = 0.0 #@param {type:"number"}
@@ -299,7 +345,10 @@ def cells():
         md(_IMPROVE_66_ROBUSTHEITSHINWEIS_SUCHT_EINST),
         md(_IMPROVE_67_DETAILS_STYLE_MARGIN_10PX_0_PA),
         colab_code("📥 Konfirmations-Template herunterladen", _IMPROVE_68_TITLE_KONFIRMATIONS_TEMPLATE_H),
-        colab_code("📝 Konfirmationswürfe eingeben (Weite in cm)", _IMPROVE_69_TITLE_KONFIRMATIONSW_RFE_EINGE),
+        md(_IMPROVE_KONF_UPLOAD_INFO),
+        colab_code("⬆️ Konfirmationswürfe aus Excel hochladen", _IMPROVE_KONF_UPLOAD),
+        md(_IMPROVE_KONF_FALLBACK_INFO),
+        colab_code("🛟 [Fallback] Konfirmationswürfe manuell eingeben", _IMPROVE_69_TITLE_KONFIRMATIONSW_RFE_EINGE),
         colab_code("📊 Konfirmation auswerten", _IMPROVE_70_TITLE_KONFIRMATION_AUSWERTEN),
         phase_export_cell("IMPROVE"),
     ]
