@@ -109,46 +109,99 @@ Nutzt das Regressionsmodell, um für **beliebige Faktoreinstellungen** die Wurfw
 
 _IMPROVE_63_TITLE_PROGNOSETOOL_WURFWEITE_V = r"""import ipywidgets as _widgets
 
-# Slider pro Faktor erzeugen
-_faktor_sliders = []
-_slider_box = []
-for _f in projekt.faktoren:
-    _center = (_f["low"] + _f["high"]) / 2
-    _half = (_f["high"] - _f["low"]) / 2
+# Nur die Faktoren verwenden, die auch tatsächlich im Modell sind
+_faktoren_prognose = helper._effektive_faktoren(projekt)
+
+# FloatText (unbounded) ist Source-of-Truth, Slider dient der Exploration
+_faktor_inputs = []   # [(faktor_dict, float_text_widget), ...]
+_rows = []
+
+for _f in _faktoren_prognose:
+    _low = float(_f["low"])
+    _high = float(_f["high"])
+    _center = (_low + _high) / 2
+    _half = (_high - _low) / 2
+    _step = max((_high - _low) / 100.0, 1e-4)
+    # Slider: DoE-Bereich ± eine halbe DoE-Breite (± 50 %)
+    _smin = _low - _half
+    _smax = _high + _half
+
     _slider = _widgets.FloatSlider(
         value=_center,
-        min=_f["low"] - 0.2 * _half,
-        max=_f["high"] + 0.2 * _half,
-        step=round(_half / 10, 2) or 0.1,
+        min=_smin,
+        max=_smax,
+        step=_step,
         description=f'{_f["name"]} ({_f["einheit"]})',
         style={'description_width': '180px'},
-        layout=_widgets.Layout(width='500px'),
-        readout_format='.1f',
+        layout=_widgets.Layout(width='420px'),
+        readout=False,
+        continuous_update=False,
     )
-    # Kodierter Wert als Label daneben
-    _code_label = _widgets.Label(value="(kodiert: 0.00)")
-    def _update_label(change, lbl=_code_label, f=_f):
-        c = (f["low"] + f["high"]) / 2
-        h = (f["high"] - f["low"]) / 2
-        coded = (change["new"] - c) / h if h > 0 else 0
-        lbl.value = f"(kodiert: {coded:+.2f})"
-    _slider.observe(_update_label, names='value')
-    _faktor_sliders.append(_slider)
-    _slider_box.append(_widgets.HBox([_slider, _code_label]))
+    _text = _widgets.FloatText(
+        value=_center,
+        step=_step,
+        layout=_widgets.Layout(width='110px'),
+    )
+    _code_label = _widgets.Label(value='(kodiert: 0.00)')
+    _extra_label = _widgets.HTML(value='')
+
+    def _make_sync(slider, text, code_label, extra_label, f):
+        low, high = float(f["low"]), float(f["high"])
+        c = (low + high) / 2
+        h = (high - low) / 2
+        _state = {'updating': False}
+
+        def _from_slider(change):
+            if _state['updating']:
+                return
+            _state['updating'] = True
+            try:
+                text.value = change['new']
+            finally:
+                _state['updating'] = False
+
+        def _from_text(change):
+            if _state['updating']:
+                return
+            _state['updating'] = True
+            try:
+                v = float(change['new'])
+                clamped = max(slider.min, min(slider.max, v))
+                if abs(slider.value - clamped) > 1e-9:
+                    slider.value = clamped
+                coded = (v - c) / h if h > 0 else 0.0
+                code_label.value = f'(kodiert: {coded:+.2f})'
+                if v < low - 1e-9 or v > high + 1e-9:
+                    extra_label.value = (
+                        '<span style="color:#B45309; font-weight:bold;">'
+                        '⚠️ extrapoliert</span>'
+                    )
+                else:
+                    extra_label.value = ''
+            finally:
+                _state['updating'] = False
+
+        slider.observe(_from_slider, names='value')
+        text.observe(_from_text, names='value')
+        # Initiale Labels setzen
+        _from_text({'new': text.value})
+
+    _make_sync(_slider, _text, _code_label, _extra_label, _f)
+
+    _faktor_inputs.append((_f, _text))
+    _rows.append(_widgets.HBox([_slider, _text, _code_label, _extra_label]))
 
 _output = _widgets.Output()
 
 def _berechne_prognose(_btn):
     _output.clear_output()
     with _output:
-        werte = {}
-        for _f, _s in zip(projekt.faktoren, _faktor_sliders):
-            werte[_f["name"]] = _s.value
+        werte = {f['name']: float(t.value) for f, t in _faktor_inputs}
         ergebnis = helper.prognostiziere(
-            projekt.modell, projekt.faktoren, werte
+            projekt.modell, _faktoren_prognose, werte
         )
         helper.zeige_prognose(
-            ergebnis, projekt.faktoren, werte,
+            ergebnis, _faktoren_prognose, werte,
             zielweite=projekt.zielweite
         )
 
@@ -160,9 +213,19 @@ _btn = _widgets.Button(
 _btn.on_click(_berechne_prognose)
 
 # Anzeige
-display(HTML(f"<p><strong>Zielweite:</strong> {projekt.zielweite:.0f} cm ± {projekt.toleranz:.0f} cm</p>"))
-for _box in _slider_box:
-    display(_box)
+display(HTML(
+    f"<p><strong>Zielweite:</strong> {projekt.zielweite:.0f} cm "
+    f"± {projekt.toleranz:.0f} cm</p>"
+))
+display(HTML(
+    "<p style='color:#6B7280; font-size:0.9em; margin:4px 0 10px 0;'>"
+    "💡 Der Slider deckt den DoE-Bereich ± 50 % ab. Für Werte weit außerhalb "
+    "das Zahlenfeld rechts nutzen — solche Prognosen sind <em>Extrapolation</em> "
+    "und vom Modell <strong>nicht belegt</strong>."
+    "</p>"
+))
+for _row in _rows:
+    display(_row)
 display(_btn)
 display(_output)
 
