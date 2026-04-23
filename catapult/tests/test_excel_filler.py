@@ -331,7 +331,7 @@ class TestFillKonfirmation:
         assert os.path.exists(result)
 
     def test_weite_spalte_befuellt(self, konfirmation_template, tmp_dir):
-        """Die Weite-Spalte enthaelt 15 Messwerte."""
+        """Die Weite-Spalte enthaelt 20 Messwerte."""
         from openpyxl import load_workbook
 
         out = os.path.join(tmp_dir, "Konf_filled.xlsx")
@@ -357,7 +357,7 @@ class TestFillKonfirmation:
                 werte.append(val)
             row += 1
 
-        assert len(werte) == 15, f"Erwartet 15, bekommen {len(werte)}"
+        assert len(werte) == 20, f"Erwartet 20, bekommen {len(werte)}"
         assert all(w > 0 for w in werte)
 
     def test_werte_nahe_zielweite(self, konfirmation_template, tmp_dir):
