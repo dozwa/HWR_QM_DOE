@@ -104,9 +104,9 @@ class Projekt:
     vermessung_max_einstellung: Dict[str, float] = field(default_factory=dict)
     vermessung_beschreibung: str = ""
     # Manuelle Annäherung an die Zielweite (OFAT): Protokoll der Iterationen +
-    # finalisierte typische Einstellung für Testwürfe und Baseline.
+    # finalisierte initiale Einstellung für Testwürfe und Baseline.
     annaeherung_log: List[Dict] = field(default_factory=list)
-    typische_einstellung: Dict[str, float] = field(default_factory=dict)
+    initiale_einstellung: Dict[str, float] = field(default_factory=dict)
 
     # MEASURE
     msa_type1: Optional[Dict] = None
@@ -595,9 +595,9 @@ def protokolliere_annaeherung(projekt: Projekt,
     speichere_fortschritt(projekt)
 
 
-def setze_typische_einstellung(projekt: Projekt,
+def setze_initiale_einstellung(projekt: Projekt,
                                einstellung: Optional[Dict[str, float]] = None) -> None:
-    """Übernimmt eine Einstellung als "typisch" für Testwürfe und Baseline.
+    """Übernimmt eine Einstellung als "initiale Einstellung" für Testwürfe und Baseline.
 
     Wird ohne Argument aufgerufen, übernimmt sie die Einstellung der **letzten**
     Annäherungs-Iteration. Sonst wird das übergebene Dict verwendet.
@@ -613,9 +613,9 @@ def setze_typische_einstellung(projekt: Projekt,
         print("⚠️ Leere Einstellung — keine Änderung gespeichert.")
         return
 
-    projekt.typische_einstellung = dict(einstellung)
-    print("✅ Typische Einstellung übernommen:")
-    for name, val in projekt.typische_einstellung.items():
+    projekt.initiale_einstellung = dict(einstellung)
+    print("✅ Initiale Einstellung übernommen:")
+    for name, val in projekt.initiale_einstellung.items():
         einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
         print(f"   • {name}: {val} {einheit}")
     speichere_fortschritt(projekt)
@@ -3406,9 +3406,9 @@ def _projekt_to_dict(projekt: Projekt) -> dict:
     d["vermessung_min_einstellung"] = projekt.vermessung_min_einstellung
     d["vermessung_max_einstellung"] = projekt.vermessung_max_einstellung
     d["vermessung_beschreibung"] = projekt.vermessung_beschreibung
-    # Annäherung & typische Einstellung
+    # Annäherung & initiale Einstellung
     d["annaeherung_log"] = _sanitize(projekt.annaeherung_log)
-    d["typische_einstellung"] = projekt.typische_einstellung
+    d["initiale_einstellung"] = projekt.initiale_einstellung
 
     # MSA
     if projekt.msa_type1 is not None:
@@ -3491,9 +3491,10 @@ def _dict_to_projekt(d: dict) -> Projekt:
     p.vermessung_min_einstellung = d.get("vermessung_min_einstellung", {})
     p.vermessung_max_einstellung = d.get("vermessung_max_einstellung", {})
     p.vermessung_beschreibung = d.get("vermessung_beschreibung", "")
-    # Annäherung & typische Einstellung
+    # Annäherung & initiale Einstellung (Legacy-Key "typische_einstellung" akzeptieren)
     p.annaeherung_log = d.get("annaeherung_log", [])
-    p.typische_einstellung = d.get("typische_einstellung", {})
+    p.initiale_einstellung = d.get("initiale_einstellung",
+                                   d.get("typische_einstellung", {}))
 
     # MSA
     p.msa_type1 = d.get("msa_type1")
@@ -3761,8 +3762,8 @@ def zeige_restore_zusammenfassung(projekt: Projekt):
         details.append(f"Katapult vermessen: {_min:.0f}–{_max:.0f} cm")
     if projekt.annaeherung_log:
         details.append(f"Annäherung: {len(projekt.annaeherung_log)} Iteration(en) protokolliert")
-    if projekt.typische_einstellung:
-        details.append(f"Typische Einstellung: {len(projekt.typische_einstellung)} Faktor(en) festgelegt")
+    if projekt.initiale_einstellung:
+        details.append(f"Initiale Einstellung: {len(projekt.initiale_einstellung)} Faktor(en) festgelegt")
     if len(projekt.testwuerfe) > 0:
         details.append(f"Testwürfe: {len(projekt.testwuerfe)} Stück "
                        f"(μ={np.mean(projekt.testwuerfe):.1f} cm)")

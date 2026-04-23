@@ -49,7 +49,7 @@ _MEASURE_21_TITLE_MSA_TEMPLATE_HERUNTERLAD = r"""anzahl_personen = 3 #@param {ty
 filepath = helper.generate_msa_template(
     gruppenname=projekt.gruppenname,
     num_personen=anzahl_personen,
-    messmodus="1D",
+    messmodus=projekt.messmodus,
 )
 print(f"✅ Template erstellt: {filepath}")
 
@@ -172,22 +172,13 @@ _MEASURE_26_PROZESS_BASELINE = r"""### Prozess-Baseline
 
 Jetzt erhebt ihr euren **Ist-Zustand**: Wie gut trifft euer Katapult aktuell?
 
-1. Stellt euer Katapult auf die **typische Einstellung** aus DEFINE (wird unten angezeigt)
-2. Macht **10–15 Würfe**
+1. Stellt euer Katapult auf die **initiale Einstellung** (aus DEFINE)
+2. Macht **mindestens 10, gern bis zu 20 Würfe** (mehr Würfe = aussagekräftigere Baseline)
 3. Messt jede Wurfweite und tragt sie unten ein
 
-> Wichtig: Die Baseline muss dieselbe Einstellung wie die Testwürfe verwenden, damit die Konfirmation am Ende vergleichbar bleibt."""
+> Die Baseline ist euer Referenzpunkt. Am Ende des Tages vergleichen wir: **Baseline vs. Konfirmation**."""
 
-_MEASURE_27_TITLE_BASELINE_W_RFE_EINGEBEN = r"""if projekt.typische_einstellung:
-    print("Werft mit der typischen Einstellung aus DEFINE:")
-    for name, val in projekt.typische_einstellung.items():
-        einheit = next((f["einheit"] for f in projekt.faktoren if f["name"] == name), "")
-        print(f"   • {name}: {val} {einheit}")
-else:
-    print("⚠️ Keine typische Einstellung in DEFINE festgelegt — die Baseline lässt sich später")
-    print("   schlecht mit der Konfirmation vergleichen. Geht kurz zurück zu DEFINE → Annäherung.")
-
-wurf_01 = 0.0 #@param {type:"number"}
+_MEASURE_27_TITLE_BASELINE_W_RFE_EINGEBEN = r"""wurf_01 = 0.0 #@param {type:"number"}
 wurf_02 = 0.0 #@param {type:"number"}
 wurf_03 = 0.0 #@param {type:"number"}
 wurf_04 = 0.0 #@param {type:"number"}
@@ -245,10 +236,10 @@ _MEASURE_28_TITLE_BASELINE_AUSWERTUNG = r"""if len(projekt.baseline_wuerfe) > 0:
         helper.zeige_ampel(b['shapiro_p'], shapiro_schwellen,
                           titel="Shapiro-Wilk p-Wert:")
 
-    # Zielscheibe (1D: nur Weite)
+    # Zielscheibe
     fig2 = helper.plot_zielscheibe(
         projekt.baseline_wuerfe, projekt.zielweite, projekt.toleranz,
-        modus="1D", titel="Baseline – Ist-Zustand"
+        modus=projekt.messmodus, titel="Baseline – Ist-Zustand"
     )
     helper._save_fig(projekt, fig2, "measure_baseline_zielscheibe")
     plt.show()
