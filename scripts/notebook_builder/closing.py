@@ -64,7 +64,7 @@ _save_dir = helper._fortschritt_verzeichnis(projekt)
 if _save_dir:
     os.makedirs(_save_dir, exist_ok=True)
     shutil.copy2(filepath, os.path.join(_save_dir, os.path.basename(filepath)))
-    print(f"💾 ZIP auch in Google Drive gespeichert.")
+    print(f"📦 ZIP auch in Google Drive gespeichert.")
 
 try:
     from google.colab import files
@@ -74,7 +74,11 @@ except ImportError:
     print(f"📁 Datei: {filepath}")
 
 print("""
-📋 Die ZIP-Datei enthält:
+⭐ DIESE ZIP-Datei ist die eine Datei, die ihr für euren Bericht braucht.
+   Alles andere auf Drive (Phasen-Ordner, fortschritt.json) sind nur
+   Sicherungen für den Wiedereinstieg.
+
+📋 Inhalt der ZIP:
    📂 plots/     – Alle Grafiken als PNG
    📂 daten/     – Alle Datentabellen als CSV
    📄 zusammenfassung.txt – Ergebnisübersicht
@@ -96,7 +100,7 @@ Ihr habt heute den **kompletten DMAIC-Zyklus** durchlaufen:
 
 ## Nächste Schritte
 - **Bericht einreichen bis 30. April 2026**
-- Nutzt die exportierten PNGs und CSVs als Grundlage
+- Grundlage ist die **ZIP-Datei aus der Zelle oben** (Plots als PNG, Daten als CSV, Zusammenfassung)
 - Nicht nur Ergebnisse zeigen – **erklären, was sie bedeuten!**
 
 > *Das Ziel dieser Session ist nicht, ein perfektes Katapult zu bauen, sondern den DMAIC-Prozess als Werkzeug für systematische Verbesserung zu erlernen und anzuwenden.*"""

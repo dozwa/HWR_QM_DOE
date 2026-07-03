@@ -83,8 +83,18 @@ except ImportError:
 
 # Type-1 auslesen
 import openpyxl
-wb = openpyxl.load_workbook(msa_file, data_only=True)
-ws_type1 = wb["Type-1"]
+try:
+    wb = openpyxl.load_workbook(msa_file, data_only=True)
+    ws_type1 = wb["Type-1"]
+except FileNotFoundError:
+    raise SystemExit(f"❌ Datei '{msa_file}' nicht gefunden — bitte die ausgefüllte "
+                     f"MSA-Excel hochladen (Zelle erneut ausführen).")
+except KeyError:
+    raise SystemExit("❌ In der Excel fehlt das Blatt 'Type-1' — habt ihr die "
+                     "richtige Datei (MSA_Messung_Template.xlsx) hochgeladen?")
+except Exception as _e:
+    raise SystemExit(f"❌ Excel konnte nicht gelesen werden ({_e}) — ist es eine "
+                     f"gültige .xlsx-Datei?")
 
 # Header in Zeile 8, Daten ab Zeile 9
 type1_data = {}

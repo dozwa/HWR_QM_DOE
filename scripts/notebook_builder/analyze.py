@@ -50,6 +50,14 @@ else:
         for f in _faktoren_doe:
             cp = "mit CP" if f["centerpoint_moeglich"] else "ohne CP"
             print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}] ({cp})")
+        _deaktiviert = [f["name"] for i, f in enumerate(projekt.faktoren)
+                        if i < 5 and not _aktiv_flags[i]]
+        if _deaktiviert:
+            print(f"\n⚠️ NICHT im Versuchsplan (Checkbox deaktiviert): {', '.join(_deaktiviert)}")
+            print(f"   Ein vollfaktorieller Plan hat dadurch 2^{len(_faktoren_doe)} = "
+                  f"{2**len(_faktoren_doe)} Eckpunkte statt 2^{len(projekt.faktoren)} = "
+                  f"{2**len(projekt.faktoren)}. Falls das keine Absicht war: Checkbox wieder aktivieren "
+                  f"und diese Zelle erneut ausführen.")
         helper.speichere_fortschritt(projekt)
 '''
 
@@ -68,8 +76,8 @@ wiederholungen = max(1, min(10, int(wiederholungen)))
 # DoE-Faktoren aus ANALYZE-Verfeinerung (Fallback: Master-Liste aus DEFINE)
 _fak_doe = helper._effektive_faktoren(projekt)
 if not _fak_doe:
-    print("❌ Keine Faktoren verfügbar. Bitte zuerst DEFINE → 'Faktoren übernehmen' ausführen.")
-    raise RuntimeError("keine Faktoren")
+    raise SystemExit("❌ Keine Faktoren verfügbar — bitte zuerst DEFINE → "
+                     "'Faktoren übernehmen' ausführen, dann diese Zelle erneut starten.")
 
 # Validierung
 for f in _fak_doe:
@@ -127,7 +135,7 @@ In der Versuchsmatrix werden die Faktorstufen **kodiert**:
 
 Die Kodierung hat einen wichtigen Vorteil: Alle Faktoren sind auf die gleiche Skala normiert. Dadurch kann man die **Effektgrößen direkt vergleichen** – egal ob ein Faktor in Grad und der andere in Zentimetern gemessen wird.
 
-Ein Koeffizient von +25 bei kodierter Eingabe bedeutet: Wenn der Faktor von −1 auf +1 wechselt (also von Low auf High), steigt die Wurfweite um 25 cm.
+Ein Koeffizient von +25 bei kodierter Eingabe bedeutet: **Pro kodierter Einheit** steigt die Wurfweite um 25 cm. Der Wechsel von −1 auf +1 (Low → High) umfasst **zwei** kodierte Einheiten — der Gesamteffekt Low→High ist also **2 × 25 = 50 cm**.
 </div>
 </details>"""
 
@@ -228,9 +236,8 @@ _ANALYZE_44_TITLE_REGRESSIONSMODELL_BERECH = r"""try:
                 print(f"   • {f['name']} [{f['low']} – {f['high']} {f['einheit']}]")
 
     projekt.modell = helper.fitte_modell(projekt.doe_ergebnisse, _fak)
-    print(f"✅ Modell berechnet!")
-    print(f"   R² = {projekt.modell.rsquared:.4f}")
-    print(f"   Adj. R² = {projekt.modell.rsquared_adj:.4f}")
+    print("Modell berechnet — ob es gut ist, zeigt die Modellgüte-Zelle unten.")
+    print(f"   R² = {projekt.modell.rsquared:.4f} (Trainingsdaten — allein noch keine Güte-Aussage)")
     print(f"   Faktoren: {', '.join(projekt.modell._faktor_namen)}")
     helper.speichere_fortschritt(projekt)
 except Exception as e:
@@ -248,7 +255,8 @@ except Exception as e:
         print("  ⚠️ Keine Faktoren definiert! Bitte DEFINE → 'Faktoren übernehmen' ausführen.")
 """
 
-_ANALYZE_45_TITLE_AUTOMATISCHES_MODELL_PRU = r"""projekt.modell_gepruned, projekt.pruning_log = helper.hierarchisches_pruning(projekt.modell)
+_ANALYZE_45_TITLE_AUTOMATISCHES_MODELL_PRU = r"""_modell_voll = projekt.modell  # ungeprunt für PRESS-Vergleich aufheben
+projekt.modell_gepruned, projekt.pruning_log = helper.hierarchisches_pruning(projekt.modell)
 
 print("Pruning-Protokoll:")
 for msg in projekt.pruning_log:
@@ -257,7 +265,10 @@ for msg in projekt.pruning_log:
 # Modell aktualisieren
 if projekt.modell_gepruned is not None:
     projekt.modell = projekt.modell_gepruned
-    print(f"\n✅ Finales Modell: R² = {projekt.modell.rsquared:.4f}")"""
+    print(f"\nFinales Modell nach Pruning: R² = {projekt.modell.rsquared:.4f} (Trainingsdaten)")
+
+# Hat das Pruning der Vorhersagegüte gut getan? — PRESS-Vergleich
+helper.zeige_pruning_press_vergleich(_modell_voll, projekt.modell)"""
 
 _ANALYZE_46_DETAILS_STYLE_MARGIN_10PX_0_PA = r"""<details style="margin:10px 0; padding:8px; background:#F9FAFB; border:1px solid #E5E7EB; border-radius:6px;">
 <summary style="cursor:pointer; font-weight:bold; color:#2563EB;">
@@ -266,7 +277,7 @@ _ANALYZE_46_DETAILS_STYLE_MARGIN_10PX_0_PA = r"""<details style="margin:10px 0; 
 <div style="margin-top:8px; padding:8px; font-size:0.95em;">
 Ein Interaktionseffekt bedeutet, dass die Wirkung von Faktor A davon abhängt, auf welcher Stufe Faktor B steht. Ohne den Haupteffekt A im Modell wäre die Interaktion nicht korrekt interpretierbar. Deshalb bleibt Faktor A im Modell, auch wenn er allein nicht signifikant ist.
 
-**Beispiel:** Wenn die Interaktion "Winkel × Spannung" signifikant ist (p < 0.05), bleiben sowohl "Winkel" als auch "Spannung" im Modell – auch wenn einer der beiden Haupteffekte allein p > 0.05 hat.
+**Beispiel:** Wenn die Interaktion "Winkel × Spannung" signifikant ist (p < 0,05), bleiben sowohl "Winkel" als auch "Spannung" im Modell – auch wenn einer der beiden Haupteffekte allein p > 0,05 hat.
 </div>
 </details>"""
 
@@ -291,12 +302,45 @@ if (p_vals > 0.05).all():
 
 _ANALYZE_49_TITLE_MODELLG_TE = r"""helper.zeige_modellguete(projekt.modell)"""
 
+_ANALYZE_49B_DETAILS_PRESS = r"""<details style="margin:10px 0; padding:8px; background:#F9FAFB; border:1px solid #E5E7EB; border-radius:6px;">
+<summary style="cursor:pointer; font-weight:bold; color:#2563EB;">
+🔍 Für Neugierige: Warum reicht R² nicht — was ist R²_pred (PRESS)?
+</summary>
+<div style="margin-top:8px; padding:8px; font-size:0.95em;">
+
+**R²** misst nur, wie gut das Modell die Würfe beschreibt, aus denen es gebaut wurde. Das ist wie eine Klausur, deren Fragen man vorher kannte: Mit genug Modelltermen bekommt man fast immer eine gute Note — auch wenn man nichts verstanden hat (Overfitting).
+
+**R²_pred** stellt die ehrlichere Frage: *Wie gut würde das Modell einen Wurf vorhersagen, den es noch nie gesehen hat?* Dafür wird reihum jeder Wurf einmal weggelassen, das Modell sagt ihn „blind" vorher, und die Fehler werden aufsummiert (**PRESS** = Predicted Residual Sum of Squares).
+
+**Faustregeln:**
+- R²_pred nahe an R² → Modell verallgemeinert gut
+- R²_pred deutlich unter R² (Δ > 0,2) → Overfitting-Verdacht
+- R²_pred kann sogar **negativ** werden: Dann sagt das Modell neue Würfe schlechter vorher als der simple Mittelwert!
+</div>
+</details>"""
+
 _ANALYZE_50_TITLE_HINTERGRUNDPR_FUNGEN_VIF = r"""# VIF
 vifs = helper.pruefe_vif(projekt.modell)
 
 # Lack-of-Fit (nur wenn Centerpoints vorhanden)
 if projekt.doe_ergebnisse is not None:
     lof = helper.pruefe_lack_of_fit(projekt.modell, projekt.modell._daten)"""
+
+_ANALYZE_50B_DETAILS_VIF_LOF = r"""<details style="margin:10px 0; padding:8px; background:#F9FAFB; border:1px solid #E5E7EB; border-radius:6px;">
+<summary style="cursor:pointer; font-weight:bold; color:#2563EB;">
+🔍 Für Neugierige: Was prüfen VIF und Lack-of-Fit?
+</summary>
+<div style="margin-top:8px; padding:8px; font-size:0.95em;">
+
+**VIF (Variance Inflation Factor)** prüft, ob sich die Faktoren gegenseitig „im Weg stehen". In einem sauber durchgeführten DoE sind die Faktoren per Konstruktion unabhängig (VIF ≈ 1). Ein VIF > 5 ist deshalb ein Alarmsignal: Vermutlich wurden Versuche vertauscht, falsch eingetragen oder Zeilen gelöscht — nicht ein Statistik-, sondern ein Datenproblem.
+
+**Lack-of-Fit** vergleicht zwei Arten von Streuung:
+- *Pure Error*: Wie stark streuen Wiederholungswürfe bei **identischer** Einstellung? (Das ist das echte Rauschen.)
+- *Lack of Fit*: Wie weit liegen die Setting-Mittelwerte vom Modell entfernt?
+
+Ist der Lack-of-Fit deutlich größer als das Rauschen (p < 0,05), fehlt dem Modell systematisch etwas — z.B. eine Krümmung oder eine Interaktion.
+</div>
+</details>"""
 
 _ANALYZE_51_TITLE_RESIDUENPLOTS_ANOVA_TABE = r"""fig = helper.plot_residuen(projekt.modell)
 helper._save_fig(projekt, fig, "analyze_residuen")
@@ -347,7 +391,9 @@ def cells():
         colab_code("📊 Pareto-Diagramm der standardisierten Effekte", _ANALYZE_47_TITLE_PARETO_DIAGRAMM_DER_STAN),
         colab_code("📊 Koeffiziententabelle", _ANALYZE_48_TITLE_KOEFFIZIENTENTABELLE),
         colab_code("📊 Modellgüte", _ANALYZE_49_TITLE_MODELLG_TE),
+        md(_ANALYZE_49B_DETAILS_PRESS),
         colab_code("⚙️ Hintergrundprüfungen (VIF, Lack-of-Fit)", _ANALYZE_50_TITLE_HINTERGRUNDPR_FUNGEN_VIF),
+        md(_ANALYZE_50B_DETAILS_VIF_LOF),
         colab_code("🔍 Residuenplots + ANOVA-Tabelle (Prio 2)", _ANALYZE_51_TITLE_RESIDUENPLOTS_ANOVA_TABE),
         md(_ANALYZE_52_DETAILS_STYLE_MARGIN_10PX_0_PA),
         md(_ANALYZE_53_DIV_STYLE_PADDING_10PX_BORDER),

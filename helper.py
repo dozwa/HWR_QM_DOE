@@ -1307,21 +1307,23 @@ def generiere_versuchsplan(
 
     n_basis = len(design_coded)
 
-    # Centerpoints: nur für Faktoren mit centerpoint_moeglich=True
-    # Binäre Faktoren werden im Centerpoint auf Low (-1) gesetzt
+    # Wiederholungen: nur die Eckpunkte werden repliziert
+    design_repeated = np.tile(design_coded, (wiederholungen, 1))
+
+    # Centerpoints: nur für Faktoren mit centerpoint_moeglich=True;
+    # binäre Faktoren werden im Centerpoint auf Low (-1) gesetzt.
+    # Centerpoints werden NICHT mit den Wiederholungen multipliziert —
+    # "3 Centerpoints" bedeutet 3 Würfe in der Mitte, unabhängig davon,
+    # wie oft die Eckpunkte wiederholt werden.
     cp_mask = [f.get("centerpoint_moeglich", True) for f in faktoren]
     hat_cp_faktoren = any(cp_mask)
 
     if centerpoints > 0 and hat_cp_faktoren:
         cp_row = np.array([-1.0 if not cp_ok else 0.0 for cp_ok in cp_mask])
         cp = np.tile(cp_row, (centerpoints, 1))
-        design_with_cp = np.vstack([design_coded, cp])
+        design_repeated = np.vstack([design_repeated, cp])
     else:
         centerpoints = 0
-        design_with_cp = design_coded
-
-    # Wiederholungen
-    design_repeated = np.tile(design_with_cp, (wiederholungen, 1))
 
     # DataFrame erstellen
     columns_coded = [f"{f['name']}_coded" for f in faktoren]
@@ -1341,10 +1343,44 @@ def generiere_versuchsplan(
     # Versuchsnummer
     df.insert(0, "Versuch_Nr", range(1, len(df) + 1))
 
-    # Blocking
+    # Blocking: Der Block darf nie mit einem Haupteffekt konfundiert sein.
+    # Vollfaktoriell: Block = Vorzeichen der höchsten Interaktion (klassisch).
+    # Fraktioniert: höchste Interaktion ist mit Haupteffekten aliasiert —
+    # dann Blöcke über die Wiederholungs-Hälften (z.B. Vormittag/Nachmittag).
+    # Centerpoints werden abwechselnd auf die Blöcke verteilt.
+    blocking_info = ""
     if blocking:
-        block_size = len(df) // 2
-        df["Block"] = [1] * block_size + [2] * (len(df) - block_size)
+        coded = df[columns_coded].to_numpy(dtype=float)
+        ist_cp_zeile = np.zeros(len(df), dtype=bool)
+        if centerpoints > 0 and hat_cp_faktoren:
+            check = np.ones(len(df), dtype=bool)
+            for i, f in enumerate(faktoren):
+                ziel = 0.0 if f.get("centerpoint_moeglich", True) else -1.0
+                check &= coded[:, i] == ziel
+            ist_cp_zeile = check
+
+        if design == "voll":
+            prod = np.prod(coded, axis=1)
+            bloecke = np.where(prod > 0, 1, 2).astype(int)
+            blocking_info = ("Block konfundiert mit der höchsten Interaktion ("
+                             + "·".join(f["name"] for f in faktoren) + ")")
+        elif wiederholungen >= 2:
+            n_ecken_gesamt = n_basis * wiederholungen
+            rep_nr = np.zeros(len(df), dtype=int)
+            rep_nr[:n_ecken_gesamt] = np.arange(n_ecken_gesamt) // n_basis
+            bloecke = np.where(rep_nr < wiederholungen / 2, 1, 2).astype(int)
+            blocking_info = "Block = Wiederholungs-Hälften (fraktioniertes Design)"
+        else:
+            print("⚠️ Blocking ist bei einem fraktionierten Design ohne "
+                  "Wiederholungen nicht sauber möglich (Block wäre mit einem "
+                  "Effekt konfundiert) — Blocking wird deaktiviert.")
+            blocking = False
+
+    if blocking:
+        cp_indices = np.where(ist_cp_zeile)[0]
+        for nr, idx in enumerate(cp_indices):
+            bloecke[idx] = 1 + (nr % 2)
+        df["Block"] = bloecke
     else:
         df["Block"] = 1
 
@@ -1378,6 +1414,7 @@ def generiere_versuchsplan(
     df.attrs["wiederholungen"] = wiederholungen
     df.attrs["centerpoints"] = centerpoints
     df.attrs["blocking"] = blocking
+    df.attrs["blocking_info"] = blocking_info if blocking else ""
     df.attrs["n_gesamt"] = len(df)
     df.attrs["konfundierung"] = konfundierung
 
@@ -1392,9 +1429,9 @@ def zeige_versuchsplan_info(df: pd.DataFrame, faktoren: List[Dict]):
         <h4 style="margin:0 0 8px 0;">Versuchsplan: {attrs.get('design_typ', '?')}</h4>
         <ul style="margin:0;">
             <li><strong>Faktoren:</strong> {len(faktoren)} ({', '.join(f['name'] for f in faktoren)})</li>
-            <li><strong>Basisversuche:</strong> {attrs.get('n_basis', '?')} + {attrs.get('centerpoints', '?')} Centerpoints</li>
-            <li><strong>Wiederholungen:</strong> {attrs.get('wiederholungen', '?')}</li>
-            <li><strong>Blocking:</strong> {'Ja (2 Blöcke)' if attrs.get('blocking') else 'Nein'}</li>
+            <li><strong>Eckpunkte:</strong> {attrs.get('n_basis', '?')} × {attrs.get('wiederholungen', '?')} Wiederholungen = {(attrs.get('n_basis') or 0) * (attrs.get('wiederholungen') or 0)} Würfe</li>
+            <li><strong>Centerpoints:</strong> {attrs.get('centerpoints', 0)} Würfe in der Mitte</li>
+            <li><strong>Blocking:</strong> {('Ja (2 Blöcke — ' + attrs.get('blocking_info', '') + ')') if attrs.get('blocking') else 'Nein'}</li>
             <li><strong>Gesamtversuche:</strong> {attrs.get('n_gesamt', len(df))}</li>
             <li><strong>Geschätzte Dauer:</strong> ~{len(df) * 2} Minuten ({len(df)} × 2 min/Wurf)</li>
         </ul>
@@ -1620,17 +1657,28 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
         num_cols = df.select_dtypes(include=[np.number]).columns
         df = df.rename(columns={num_cols[-1]: "Y"})
 
-    # NaN-Zeilen entfernen
+    # NaN-Zeilen entfernen — mit deutlicher Warnung, denn fehlende Ergebnisse
+    # verstümmeln sonst unbemerkt den Versuchsplan (weniger als 2^k Settings)
+    _n_vor = len(df)
     df = df.dropna(subset=["Y"] + faktor_namen)
+    _n_weg = _n_vor - len(df)
+    if _n_weg > 0:
+        print(f"⚠️ {_n_weg} von {_n_vor} Zeilen haben kein Ergebnis (oder keinen "
+              f"Faktorwert) und werden ignoriert. Prüft, ob wirklich alle Würfe "
+              f"ins Excel eingetragen wurden — die Auswertung sieht sonst nicht "
+              f"den vollständigen Versuchsplan.")
 
     # --- Centerpoint-Erkennung ---
-    # Centerpoints haben kodierte Werte nahe 0 (nicht ±1)
+    # Centerpoints haben kodierte Werte nahe 0 — aber nur bei Faktoren, die
+    # überhaupt eine Mittelstufe haben. Binäre Faktoren stehen im Centerpoint
+    # konventionsgemäß auf -1 und dürfen die Erkennung nicht blockieren.
     hat_centerpoints = False
     if len(df) > 0:
-        coded_abs = df[faktor_namen].abs()
-        cp_mask = (coded_abs < 0.5).all(axis=1)
-        n_centerpoints = cp_mask.sum()
-        hat_centerpoints = n_centerpoints >= 2
+        cp_faehig = [n for n in faktor_namen if (df[n].abs() < 0.5).any()]
+        if cp_faehig:
+            cp_mask = (df[cp_faehig].abs() < 0.5).all(axis=1)
+            n_centerpoints = int(cp_mask.sum())
+            hat_centerpoints = n_centerpoints >= 2
 
     # --- Entscheidung: quadratische Terme testen? ---
     teste_quad = False
@@ -1674,46 +1722,105 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
                                 mit_drei_faktor_interaktionen)
     model_lin = ols(formel_lin, data=df).fit()
 
-    # Schritt 2: Per-Faktor quadratische Terme testen
+    # Schritt 2: Krümmung testen (falls Centerpoints vorhanden)
     quad_namen = []
+    kruemmung = None
     if teste_quad:
-        # Volles quadratisches Modell fitten
-        formel_voll = _build_formula(faktor_namen, alle_quad, mit_interaktionen,
-                                     mit_drei_faktor_interaktionen)
-        model_voll = ols(formel_voll, data=df).fit()
+        # Nur Faktoren mit echter Mittelstufe können x² beitragen
+        quad_kandidaten = [s for s in alle_quad if df[s].nunique() > 1]
 
-        # Jeden x²-Term einzeln bewerten: behalten wenn p < 0.10
-        alpha_quad = 0.10
-        behalten = []
-        verworfen = []
-        for sq_name in alle_quad:
-            if sq_name in model_voll.pvalues:
-                p = model_voll.pvalues[sq_name]
-                if p < alpha_quad:
-                    behalten.append(sq_name)
-                else:
-                    verworfen.append(sq_name)
+        # Identifizierbarkeit: Sind die x²-Spalten (zusammen mit dem
+        # Intercept) linear unabhängig? Bei einem reinen 2-Level-Design mit
+        # Centerpoints sind ALLE x²-Spalten identisch (Eckpunkt=1, CP=0) —
+        # dann ist nur EIN globaler Krümmungsterm schätzbar, keine
+        # per-Faktor-Zuordnung.
+        identifizierbar = False
+        if quad_kandidaten:
+            X_sq = np.column_stack(
+                [np.ones(len(df))]
+                + [df[s].to_numpy(dtype=float) for s in quad_kandidaten])
+            identifizierbar = (np.linalg.matrix_rank(X_sq)
+                               == 1 + len(quad_kandidaten))
 
-        if behalten:
-            quad_namen = behalten
-            # Finales Modell nur mit signifikanten x²-Termen
-            formel_final = _build_formula(faktor_namen, quad_namen,
-                                          mit_interaktionen,
-                                          mit_drei_faktor_interaktionen)
-            model = ols(formel_final, data=df).fit()
-            # Faktor-Namen aus den sq-Namen ableiten (z.B. "X_sq" → "X")
-            namen_kurz = [s.replace("_sq", "") for s in behalten]
-            print(f"ℹ️ Krümmung erkannt bei: {', '.join(namen_kurz)} "
-                  f"(R²_adj: {model.rsquared_adj:.4f} "
-                  f"vs. linear {model_lin.rsquared_adj:.4f})")
-            if verworfen:
-                namen_verw = [s.replace("_sq", "") for s in verworfen]
-                print(f"   Kein x²-Term nötig für: {', '.join(namen_verw)}")
+        if identifizierbar:
+            # Volles quadratisches Modell fitten
+            formel_voll = _build_formula(faktor_namen, quad_kandidaten,
+                                         mit_interaktionen,
+                                         mit_drei_faktor_interaktionen)
+            model_voll = ols(formel_voll, data=df).fit()
+
+            # Jeden x²-Term einzeln bewerten: behalten wenn p < 0.10
+            alpha_quad = 0.10
+            behalten = []
+            verworfen = []
+            for sq_name in quad_kandidaten:
+                if sq_name in model_voll.pvalues:
+                    p = model_voll.pvalues[sq_name]
+                    if p < alpha_quad:
+                        behalten.append(sq_name)
+                    else:
+                        verworfen.append(sq_name)
+
+            if behalten:
+                quad_namen = behalten
+                # Finales Modell nur mit signifikanten x²-Termen
+                formel_final = _build_formula(faktor_namen, quad_namen,
+                                              mit_interaktionen,
+                                              mit_drei_faktor_interaktionen)
+                model = ols(formel_final, data=df).fit()
+                # Faktor-Namen aus den sq-Namen ableiten (z.B. "X_sq" → "X")
+                namen_kurz = [s.replace("_sq", "") for s in behalten]
+                print(f"ℹ️ Krümmung erkannt bei: {', '.join(namen_kurz)} "
+                      f"(R²_adj: {model.rsquared_adj:.4f} "
+                      f"vs. linear {model_lin.rsquared_adj:.4f})")
+                if verworfen:
+                    namen_verw = [s.replace("_sq", "") for s in verworfen]
+                    print(f"   Kein x²-Term nötig für: {', '.join(namen_verw)}")
+            else:
+                model = model_lin
+                if mit_quadratischen_termen == "auto":
+                    print(f"ℹ️ Kein Faktor zeigt signifikante Krümmung — "
+                          f"lineares Modell beibehalten (R²_adj: {model_lin.rsquared_adj:.4f})")
+        elif quad_kandidaten:
+            # Globaler Krümmungstest: alle x²-Spalten tragen dieselbe
+            # Information (Eckpunkt=1, CP=0). Als Modellterm wird der
+            # Mittelwert der x²-Spalten verwendet — bei der Vorhersage an
+            # Zwischenpunkten verteilt das die Krümmung GLEICHMÄSSIG über
+            # die stetigen Faktoren (explizite Annahme, da eine echte
+            # Zuordnung mit diesem Design nicht schätzbar ist).
+            df["Kruemmung"] = df[quad_kandidaten].mean(axis=1)
+            formel_k = _build_formula(faktor_namen, ["Kruemmung"],
+                                      mit_interaktionen,
+                                      mit_drei_faktor_interaktionen)
+            model_k = ols(formel_k, data=df).fit()
+            p_k = float(model_k.pvalues.get("Kruemmung", 1.0))
+            beta_k = float(model_k.params.get("Kruemmung", 0.0))
+            # delta = ȳ_Centerpoints − ȳ_Eckpunkte-Ebene
+            kruemmung = {"p": p_k, "delta_cp": -beta_k,
+                         "signifikant": p_k < 0.10,
+                         "im_modell": p_k < 0.10,
+                         "faktoren": [s[:-3] for s in quad_kandidaten]}
+            if p_k < 0.10:
+                model = model_k
+                richtung = "über" if beta_k < 0 else "unter"
+                print(f"⚠️ Krümmung erkannt (p={p_k:.3f}): Die Centerpoint-"
+                      f"Würfe liegen im Mittel {abs(beta_k):.1f} cm "
+                      f"{richtung} der Ebene der Eckpunkte.")
+                print("   Mit einem 2-Level-Design lässt sich die Krümmung "
+                      "keinem einzelnen Faktor zuordnen. Das Modell enthält "
+                      "deshalb EINEN gemeinsamen Krümmungsterm (Annahme: "
+                      "gleichmäßig über die stetigen Faktoren verteilt). "
+                      "Für eine echte Zuordnung wären zusätzliche Stützpunkte "
+                      "nötig, z.B. ein zentral zusammengesetzter "
+                      "Versuchsplan/CCD.")
+            else:
+                model = model_lin
+                if mit_quadratischen_termen == "auto":
+                    print(f"ℹ️ Keine signifikante Krümmung (p={p_k:.3f}) — "
+                          f"lineares Modell beibehalten "
+                          f"(R²_adj: {model_lin.rsquared_adj:.4f})")
         else:
             model = model_lin
-            if mit_quadratischen_termen == "auto":
-                print(f"ℹ️ Kein Faktor zeigt signifikante Krümmung — "
-                      f"lineares Modell beibehalten (R²_adj: {model_lin.rsquared_adj:.4f})")
     else:
         model = model_lin
 
@@ -1722,6 +1829,7 @@ def fitte_modell(daten: pd.DataFrame, faktoren: List[Dict],
     model._faktor_details = faktoren
     model._rename_map = {v: k for k, v in rename_map.items()}
     model._quad_namen = quad_namen
+    model._kruemmung = kruemmung
     model._daten = df
 
     return model
@@ -1744,56 +1852,57 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
     _orig_faktor_details = getattr(modell, "_faktor_details", [])
     _orig_rename_map = getattr(modell, "_rename_map", {})
     _orig_quad_namen = getattr(modell, "_quad_namen", [])
+    _orig_kruemmung = getattr(modell, "_kruemmung", None)
     log = []
 
     # Aktuelle Terme sammeln
     current_terms = [t for t in modell.params.index if t != "Intercept"]
 
+    def _ist_geschuetzt(term, modell_, terme):
+        """Haupteffekt/x²-Term geschützt, wenn eine signifikante Interaktion
+        ihn enthält (Hierarchieprinzip)."""
+        if ":" in term:
+            return None
+        basis = term[:-3] if term.endswith("_sq") else term
+        for t in terme:
+            if ":" in t and basis in t.split(":"):
+                if modell_.pvalues.get(t, 1.0) <= alpha:
+                    return t
+        return None
+
+    _schutz_gemeldet = set()
+
     while True:
-        # Finde Term mit höchstem p-Wert
+        # Kandidaten: alle insignifikanten Terme, schlechteste zuerst.
+        # Geschützte Terme werden übersprungen; entfernt wird pro Runde genau
+        # einer. Findet sich kein entfernbarer Term, terminiert die Schleife —
+        # das verhindert Endlosschleifen bei mehreren geschützten Haupteffekten.
         p_values = modell.pvalues.drop("Intercept", errors="ignore")
         p_values = p_values[p_values.index.isin(current_terms)]
+        p_values = p_values[p_values > alpha]
 
         if p_values.empty:
+            break  # Alle (verbleibenden) Terme signifikant
+
+        entfernt = False
+        for worst_term in p_values.sort_values(ascending=False).index:
+            worst_p = p_values[worst_term]
+            schutz = _ist_geschuetzt(worst_term, modell, current_terms)
+            if schutz is not None:
+                if worst_term not in _schutz_gemeldet:
+                    _schutz_gemeldet.add(worst_term)
+                    log.append(
+                        f"⚙️ {worst_term} bleibt im Modell (p={worst_p:.3f}): "
+                        f"geschützt durch signifikante Interaktion {schutz}"
+                    )
+                continue
+            current_terms.remove(worst_term)
+            log.append(f"❌ {worst_term} entfernt (p={worst_p:.3f})")
+            entfernt = True
             break
 
-        worst_term = p_values.idxmax()
-        worst_p = p_values[worst_term]
-
-        if worst_p <= alpha:
-            break  # Alle signifikant
-
-        # Hierarchie-Check: Ist worst_term ein Haupteffekt?
-        is_haupteffekt = ":" not in worst_term
-        if is_haupteffekt:
-            # Prüfe ob eine signifikante Interaktion diesen Haupteffekt enthält
-            protected = False
-            for term in current_terms:
-                if ":" in term and worst_term in term.split(":"):
-                    if modell.pvalues.get(term, 1.0) <= alpha:
-                        protected = True
-                        log.append(
-                            f"⚙️ {worst_term} bleibt im Modell (p={worst_p:.3f}): "
-                            f"geschützt durch signifikante Interaktion {term}"
-                        )
-                        break
-            if protected:
-                # Markiere als geprüft, versuche nächsten
-                p_values = p_values.drop(worst_term)
-                if p_values.empty:
-                    break
-                # Versuche den nächsthöheren p-Wert
-                worst_term = p_values.idxmax()
-                worst_p = p_values[worst_term]
-                if worst_p <= alpha:
-                    break
-                if ":" not in worst_term:
-                    # Auch diesen prüfen...
-                    continue
-
-        # Term entfernen
-        current_terms.remove(worst_term)
-        log.append(f"❌ {worst_term} entfernt (p={worst_p:.3f})")
+        if not entfernt:
+            break  # Nur noch geschützte Terme übrig
 
         if not current_terms:
             log.append("⚠️ Alle Terme entfernt – Modell nur mit Intercept")
@@ -1806,12 +1915,67 @@ def hierarchisches_pruning(modell, alpha: float = 0.05) -> Tuple[Any, List[str]]
         modell._faktor_details = _orig_faktor_details
         modell._rename_map = _orig_rename_map
         modell._quad_namen = _orig_quad_namen
+        # Krümmungs-Metadaten nur behalten, solange der Term im Modell ist
+        if _orig_kruemmung and "Kruemmung" not in current_terms:
+            modell._kruemmung = dict(_orig_kruemmung, im_modell=False)
+        else:
+            modell._kruemmung = _orig_kruemmung
         modell._daten = df
 
     if not log:
         log.append("✅ Alle Terme sind signifikant – kein Pruning nötig")
 
     return modell, log
+
+
+def vergleiche_pruning_press(modell_voll, modell_gepruned) -> Optional[Dict]:
+    """Vergleicht R²_pred (PRESS) zwischen ungeprunt und geprunt.
+
+    Hilft zu beurteilen, ob das p-Wert-Pruning der Vorhersagegüte gut tut.
+    Liefert ``None`` wenn PRESS für eine Seite nicht berechenbar ist.
+    """
+    voll = berechne_press_r2(modell_voll)
+    pruned = berechne_press_r2(modell_gepruned)
+    if not voll.get("berechenbar") or not pruned.get("berechenbar"):
+        return None
+    return {
+        "press_voll": voll["r2_pred"],
+        "press_gepruned": pruned["r2_pred"],
+        "delta": pruned["r2_pred"] - voll["r2_pred"],
+    }
+
+
+def zeige_pruning_press_vergleich(modell_voll, modell_gepruned):
+    """Stellt im Notebook den PRESS-Vergleich vor/nach Pruning dar."""
+    erg = vergleiche_pruning_press(modell_voll, modell_gepruned)
+    if erg is None:
+        display(HTML(f"""
+        <div style="padding:8px 10px; background:#F9FAFB; border:1px solid #E5E7EB;
+                    border-radius:6px; margin:6px 0; font-size:0.92em;">
+            ℹ️ PRESS-Vergleich vor/nach Pruning nicht berechenbar (Modell saturiert).
+        </div>"""))
+        return
+    delta = erg["delta"]
+    if delta >= 0:
+        farbe, icon = GREEN, "✅"
+        text = (f"Pruning hat die Vorhersagegüte <strong>verbessert</strong> "
+                f"(R²_pred {erg['press_voll']:.3f} → {erg['press_gepruned']:.3f}, "
+                f"Δ = {delta:+.3f}).")
+    elif delta > -0.05:
+        farbe, icon = ORANGE, "⚠️"
+        text = (f"Pruning hat die Vorhersagegüte leicht verschlechtert "
+                f"(R²_pred {erg['press_voll']:.3f} → {erg['press_gepruned']:.3f}, "
+                f"Δ = {delta:+.3f}). Modell ist sparsamer, aber etwas weniger genau.")
+    else:
+        farbe, icon = RED, "❌"
+        text = (f"Pruning hat die Vorhersagegüte deutlich verschlechtert "
+                f"(R²_pred {erg['press_voll']:.3f} → {erg['press_gepruned']:.3f}, "
+                f"Δ = {delta:+.3f}). Erwägt, das ungeprunte Modell zu nutzen.")
+    display(HTML(f"""
+    <div style="padding:10px; border-left:4px solid {farbe}; background:{farbe}11;
+                border-radius:4px; margin:8px 0;">
+        {icon} <strong>PRESS-Check Pruning:</strong> {text}
+    </div>"""))
 
 
 # --- 5c. Modell-Ausgaben ---
@@ -1920,30 +2084,183 @@ def zeige_koeffizienten(modell):
     display(HTML(koeffizienten_tabelle(modell)))
 
 
+def berechne_press_r2(modell) -> Dict:
+    """Berechnet R²_predicted via PRESS (Leave-One-Out auf der Hat-Matrix).
+
+    PRESS_i = (e_i / (1 - h_ii))²; PRESS = Σ PRESS_i; R²_pred = 1 - PRESS/SS_total.
+    Punkte mit h_ii ≈ 1 (saturierte Hebelpunkte) werden übersprungen — wenn
+    überhaupt welche bleiben, ist R²_pred auf den verbleibenden berechnet.
+    """
+    try:
+        infl = modell.get_influence()
+        h = np.asarray(infl.hat_matrix_diag, dtype=float)
+    except Exception:
+        return {"berechenbar": False, "grund": "Hat-Matrix nicht verfügbar"}
+
+    resid = np.asarray(modell.resid, dtype=float)
+    n = len(resid)
+    if n < 2:
+        return {"berechenbar": False, "grund": "Zu wenig Datenpunkte"}
+
+    # Saturierte Punkte (h_ii sehr nahe 1) ausschließen
+    valide = h < 0.9999
+    n_skip = int((~valide).sum())
+    if valide.sum() < 2:
+        return {
+            "berechenbar": False,
+            "grund": "Modell ist (fast) saturiert — fast jeder Punkt ist Hebelpunkt. "
+                     "R²_pred kann nicht zuverlässig berechnet werden.",
+            "n_skip": n_skip,
+        }
+
+    press_residuals = resid[valide] / (1.0 - h[valide])
+    press = float(np.sum(press_residuals ** 2))
+
+    y = np.asarray(modell.model.endog, dtype=float)
+    ss_tot = float(np.sum((y - np.mean(y)) ** 2))
+    if ss_tot <= 0:
+        return {"berechenbar": False, "grund": "SS_total = 0"}
+
+    r2_pred = 1.0 - press / ss_tot
+    return {
+        "berechenbar": True,
+        "press": press,
+        "r2_pred": r2_pred,
+        "n_skip": n_skip,
+        "n": n,
+    }
+
+
+def _replikatzahlen(modell) -> Dict:
+    """Bestimmt Anzahl Replikate je Setting im DoE-Datensatz des Modells."""
+    df = getattr(modell, "_daten", None)
+    fn = getattr(modell, "_faktor_namen", None)
+    if df is None or not fn:
+        return {"berechenbar": False}
+    df = df.dropna(subset=fn + ["Y"]) if "Y" in df.columns else df.dropna(subset=fn)
+    if len(df) == 0:
+        return {"berechenbar": False}
+    # Settings auf 6 Nachkommastellen runden, damit minimale Float-Drift kein
+    # Pseudo-Setting erzeugt
+    keys = df[fn].round(6).apply(tuple, axis=1)
+    counts = keys.value_counts()
+    return {
+        "berechenbar": True,
+        "n_settings": int(len(counts)),
+        "n_total": int(len(df)),
+        "n_repl_min": int(counts.min()),
+        "n_repl_max": int(counts.max()),
+        "n_repl_median": float(counts.median()),
+        "n_settings_ohne_replikat": int((counts == 1).sum()),
+    }
+
+
 def zeige_modellguete(modell):
-    """Zeigt R², Adj. R², RMSE mit Ampel-Bewertung."""
+    """Zeigt R², Adj. R², R²_pred (PRESS), RMSE und Replikat-Info.
+
+    R² und Adj. R² stammen aus den Trainingsdaten. R²_pred (via PRESS) ist
+    eine Out-of-Sample-Schätzung (Leave-One-Out) — fällt der deutlich unter
+    R², sind die Trainingswerte überoptimistisch (Overfitting).
+    """
     r2 = modell.rsquared
     adj_r2 = modell.rsquared_adj
     rmse = np.sqrt(modell.mse_resid)
+    press = berechne_press_r2(modell)
+    repl = _replikatzahlen(modell)
 
-    r2_schwellen = [
-        (0.5, "❌", "Modell erklärt weniger als die Hälfte der Variation"),
-        (0.8, "⚠️", "Akzeptabel – wichtige Faktoren gefunden, aber Rauschen vorhanden"),
-        (float("inf"), "✅", "Sehr gutes Modell – Faktoren erklären die Wurfweite gut"),
+    # Ampel auf Basis von R²_pred. Wichtig: Ist PRESS nicht berechenbar
+    # (typisch: Modell fast saturiert), darf NICHT aufs Trainings-R²
+    # zurückgefallen werden — das ist genau der Fall, in dem R² automatisch
+    # hoch ist, ohne dass das Modell etwas vorhersagen kann.
+    if press.get("berechenbar"):
+        r2_schwellen = [
+            (0.5, "❌", "R²_pred unter 0,5 – Modell verallgemeinert nicht"),
+            (0.8, "⚠️", "R²_pred akzeptabel – aber spürbares Rauschen"),
+            (float("inf"), "✅", "R²_pred sehr gut – Modell verallgemeinert solide"),
+        ]
+        zeige_ampel(press["r2_pred"], r2_schwellen, titel="R²_pred:")
+    else:
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                     border-radius:4px; margin:8px 0;">
+            ⚠️ <strong>Vorhersagegüte nicht bewertbar:</strong>
+            {press.get('grund', 'PRESS nicht berechenbar')}.
+            Das Trainings-R² ({r2:.2f}) ist hier <strong>kein</strong> Beleg für ein
+            gutes Modell — ein (fast) saturiertes Modell erreicht automatisch ein
+            hohes R², ohne neue Würfe vorhersagen zu können. Abhilfe: mehr Würfe
+            (Wiederholungen/Centerpoints) oder weniger Modellterme.
+        </div>"""))
+
+    if press.get("berechenbar"):
+        r2_pred_str = f"{press['r2_pred']:.4f}"
+        gap = r2 - press["r2_pred"]
+    else:
+        r2_pred_str = f"– ({press.get('grund', 'nicht berechenbar')})"
+        gap = None
+
+    rows = [
+        ("R²", f"{r2:.4f}",
+         "auf Trainingsdaten – beschreibt nur die Anpassung an die DoE-Würfe"),
+        ("Adj. R²", f"{adj_r2:.4f}",
+         "wie R², aber bestraft viele Modellterme"),
+        ("R²_pred (PRESS)", r2_pred_str,
+         "Leave-One-Out – schätzt, wie gut das Modell <em>neue</em> Würfe vorhersagt"),
+        ("RMSE", f"{rmse:.2f} cm",
+         "Reststreuung im Modell"),
     ]
-    zeige_ampel(r2, r2_schwellen, titel="R²:")
-
+    rows_html = "".join(
+        f'<tr><td style="padding:6px;">{n}</td>'
+        f'<td style="padding:6px; text-align:right;">{v}</td>'
+        f'<td style="padding:6px; color:{GRAY}; font-size:0.9em;">{c}</td></tr>'
+        for n, v, c in rows
+    )
     html = f"""
-    <table style="border-collapse:collapse; width:60%; border:1px solid #E5E7EB; margin:8px 0;">
+    <table style="border-collapse:collapse; width:90%; border:1px solid #E5E7EB; margin:8px 0;">
         <tr style="background:{LIGHT_BLUE};">
-            <th style="padding:8px;">Kennzahl</th>
+            <th style="padding:8px; text-align:left;">Kennzahl</th>
             <th style="padding:8px;">Wert</th>
+            <th style="padding:8px; text-align:left;">Lesehilfe</th>
         </tr>
-        <tr><td style="padding:6px;">R²</td><td style="padding:6px; text-align:right;">{r2:.4f}</td></tr>
-        <tr><td style="padding:6px;">Adj. R²</td><td style="padding:6px; text-align:right;">{adj_r2:.4f}</td></tr>
-        <tr><td style="padding:6px;">RMSE</td><td style="padding:6px; text-align:right;">{rmse:.2f} cm</td></tr>
+        {rows_html}
     </table>"""
     display(HTML(html))
+
+    # Warnung bei großer Lücke R² – R²_pred (Overfitting-Indikator)
+    if gap is not None and gap > 0.2:
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                     border-radius:4px; margin:8px 0;">
+            ⚠️ <strong>Overfitting-Hinweis:</strong> R² ({r2:.2f}) liegt deutlich
+            über R²_pred ({press['r2_pred']:.2f}, Δ = {gap:.2f}). Das Modell
+            beschreibt die DoE-Daten besser als es neue Würfe vorhersagen kann –
+            die hohen Trainings-R² geben ein zu optimistisches Bild.
+        </div>"""))
+
+    # Replikat-Info: zeigt, ob R² überhaupt Within-Setting-Streuung enthält
+    if repl.get("berechenbar"):
+        n_settings = repl["n_settings"]
+        n_total = repl["n_total"]
+        n_min = repl["n_repl_min"]
+        n_med = repl["n_repl_median"]
+        n_solo = repl["n_settings_ohne_replikat"]
+        display(HTML(f"""
+        <div style="padding:8px 10px; background:#F9FAFB; border:1px solid #E5E7EB;
+                    border-radius:6px; margin:6px 0; font-size:0.92em;">
+            <strong>Replikate im DoE-Datensatz:</strong>
+            {n_total} Würfe an {n_settings} Settings
+            (min {n_min}, median {n_med:.0f} Würfe je Setting,
+            {n_solo} Setting{'s' if n_solo != 1 else ''} ohne Wiederholung).
+        </div>"""))
+        if n_min < 2:
+            display(HTML(f"""
+            <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                         border-radius:4px; margin:8px 0;">
+                ⚠️ <strong>Wenig Within-Setting-Streuung:</strong>
+                Mindestens ein Setting hat nur einen einzigen Wurf. R² misst dann
+                vor allem die Trennung der Setting-Mittelwerte – das Prozessrauschen
+                pro Setting fließt nicht ein. Folge: R² wirkt höher als die
+                Einzelwurf-Vorhersagegüte.
+            </div>"""))
 
 
 def pruefe_vif(modell) -> Dict:
@@ -1979,58 +2296,228 @@ def pruefe_vif(modell) -> Dict:
 
 
 def pruefe_lack_of_fit(modell, daten: pd.DataFrame) -> Dict:
-    """Prüft Lack-of-Fit über Centerpoints."""
+    """ANOVA-Lack-of-Fit-F-Test mit Pure-Error-Zerlegung.
+
+    Zerlegung der Residual-Quadratsumme in:
+        SS_Pure = Σ_settings Σ_replikate (y_ij − ȳ_i)²        (df = n − k)
+        SS_LOF  = SS_Residual − SS_Pure                        (df = n − p − (n − k))
+    Prüfgröße F = MS_LOF / MS_Pure ~ F(df_LOF, df_Pure).
+
+    Hinweis: Pure Error braucht **echte Replikate** (mehrere Würfe an exakt
+    gleichen kodierten Faktorwerten). Centerpoints sind ein Spezialfall davon,
+    werden aber genauso behandelt wie Vertex-Replikate.
+
+    Fällt der Test negativ aus, wird zusätzlich der klassische
+    Centerpoint-vs-Modell-Vergleich (Krümmungshinweis) ausgegeben — die zwei
+    Aussagen sind komplementär.
+    """
     df = daten.copy()
-    faktor_namen = modell._faktor_namen
+    faktor_namen = list(getattr(modell, "_faktor_namen", []))
 
-    # Centerpoints identifizieren
-    if "Typ" in df.columns:
-        cp_data = df[df["Typ"] == "Centerpoint"]
+    # Y-Spalte robust finden
+    if "Y" in df.columns:
+        y_col = "Y"
     else:
-        cp_mask = (df[faktor_namen] == 0).all(axis=1)
-        cp_data = df[cp_mask]
+        kandidaten = [c for c in df.columns
+                      if any(k in c.lower() for k in ("ergebnis", "weite", "result"))]
+        y_col = kandidaten[0] if kandidaten else None
 
-    if len(cp_data) < 2:
-        return {"test_moeglich": False, "grund": "Zu wenig Centerpoints"}
+    ergebnis: Dict[str, object] = {"test_moeglich": False}
 
-    # Vorhersage am Centerpoint
-    pred_at_center = modell.params["Intercept"]  # Alle kodierten Werte = 0
+    if not faktor_namen or y_col is None:
+        ergebnis["grund"] = "Faktor- oder Ergebnis-Spalte nicht gefunden"
+        return ergebnis
 
-    # Tatsächliche Centerpoint-Werte
-    if "Y" in cp_data.columns:
-        cp_values = cp_data["Y"].values
+    df = df.dropna(subset=faktor_namen + [y_col])
+    if len(df) == 0:
+        ergebnis["grund"] = "Keine Daten"
+        return ergebnis
+
+    # Settings (eindeutige Faktor-Kombinationen, robust gegen Float-Drift)
+    keys = df[faktor_namen].round(6).apply(tuple, axis=1)
+    counts = keys.value_counts()
+    n = len(df)
+    k_settings = int(len(counts))
+    n_replikate = int((counts >= 2).sum())
+
+    # Pure Error: SS innerhalb jedes Settings mit ≥ 2 Replikaten
+    ss_pure = 0.0
+    df_pure = 0
+    for key, grp in df.groupby(keys):
+        m = len(grp)
+        if m >= 2:
+            y_grp = grp[y_col].values.astype(float)
+            ss_pure += float(np.sum((y_grp - y_grp.mean()) ** 2))
+            df_pure += m - 1
+
+    ss_resid = float(np.sum(np.asarray(modell.resid, dtype=float) ** 2))
+    df_resid = int(modell.df_resid)
+    ss_lof = ss_resid - ss_pure
+    df_lof = df_resid - df_pure
+
+    # --- Krümmungs-Zusatzcheck (Centerpoints ↔ Modell) ---
+    # Nur Faktoren mit echter Mittelstufe zählen; binäre Faktoren stehen im
+    # Centerpoint auf -1 und dürfen die Erkennung nicht blockieren.
+    cp_faehig = [n for n in faktor_namen if (df[n].abs() < 0.5).any()]
+    if cp_faehig:
+        cp_mask = (df[cp_faehig].abs() < 0.5).all(axis=1)
     else:
-        cp_values = cp_data.iloc[:, -1].values
+        cp_mask = pd.Series(False, index=df.index)
+    cp_data = df[cp_mask]
+    cp_info = None
+    if len(cp_data) >= 2:
+        cp_values = cp_data[y_col].values.astype(float)
+        cp_mean = float(np.mean(cp_values))
+        cp_std = float(np.std(cp_values, ddof=1))
+        # Modellvorhersage an den tatsächlichen CP-Zeilen (berücksichtigt
+        # z.B. binäre Faktoren auf -1), Fallback: Intercept
+        try:
+            pred_at_center = float(np.mean(np.asarray(modell.predict(cp_data))))
+        except Exception:
+            pred_at_center = float(modell.params.get("Intercept", 0.0))
+        if cp_std > 0:
+            t_stat = (cp_mean - pred_at_center) / (cp_std / np.sqrt(len(cp_values)))
+            p_kruemmung = float(2 * (1 - stats.t.cdf(abs(t_stat), len(cp_values) - 1)))
+        else:
+            t_stat, p_kruemmung = 0.0, 1.0
+        cp_info = {
+            "cp_mean": cp_mean,
+            "pred_at_center": pred_at_center,
+            "t_stat": float(t_stat),
+            "p_value": p_kruemmung,
+            "kruemmung": p_kruemmung < 0.05,
+        }
 
-    cp_mean = np.mean(cp_values)
-    cp_std = np.std(cp_values, ddof=1) if len(cp_values) > 1 else 0
-
-    # Einfacher t-Test: Centerpoint-Mittelwert vs. Vorhersage
-    if cp_std > 0:
-        t_stat = (cp_mean - pred_at_center) / (cp_std / np.sqrt(len(cp_values)))
-        p_value = 2 * (1 - stats.t.cdf(abs(t_stat), len(cp_values) - 1))
-    else:
-        t_stat, p_value = 0, 1.0
-
-    kruemmung = p_value < 0.05
-
-    if kruemmung:
+    if df_pure < 1 or df_lof < 1 or ss_pure <= 0:
+        # Kein echter LOF-F-Test möglich (zu wenig Replikate oder Modell saturiert)
         display(HTML(f"""
         <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
                      border-radius:4px; margin:8px 0;">
-            ⚠️ <strong>Krümmungshinweis:</strong> Der Lack-of-Fit-Test zeigt signifikante
-            Krümmung (p={p_value:.3f}). Euer Modell zeigt Hinweise auf nichtlineare
-            Zusammenhänge. Optional: Design um Sternpunkte erweitern (CCD).
+            ⚠️ <strong>Lack-of-Fit-F-Test nicht möglich:</strong>
+            zu wenig Replikate für Pure Error (Settings mit Wiederholung: {n_replikate} von {k_settings}).
+            Aussage zur Modellgüte stützt sich daher nur auf R²/PRESS und ggf. Krümmungs­hinweis.
+        </div>"""))
+        ergebnis.update({
+            "test_moeglich": False,
+            "grund": "Zu wenig Replikate für Pure Error",
+            "n_settings": k_settings,
+            "n_settings_mit_replikat": n_replikate,
+            "ss_resid": ss_resid,
+            "ss_pure": ss_pure,
+            "df_pure": df_pure,
+        })
+        if cp_info is not None:
+            ergebnis["centerpoint_check"] = cp_info
+            if cp_info["kruemmung"]:
+                display(HTML(f"""
+                <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                             border-radius:4px; margin:8px 0;">
+                    ⚠️ <strong>Krümmungshinweis (Centerpoints):</strong> Der Mittelwert
+                    der Centerpoints weicht signifikant von der Modellvorhersage ab
+                    (p={cp_info['p_value']:.3f}). Hinweis auf nichtlineare
+                    Zusammenhänge — Design um Sternpunkte erweitern (CCD) erwägen.
+                </div>"""))
+        return ergebnis
+
+    ms_pure = ss_pure / df_pure
+    ms_lof = ss_lof / df_lof if df_lof > 0 else float("nan")
+    if ms_pure > 0 and df_lof > 0:
+        f_stat = ms_lof / ms_pure
+        p_lof = float(1.0 - stats.f.cdf(f_stat, df_lof, df_pure))
+    else:
+        f_stat, p_lof = float("nan"), float("nan")
+
+    lack_of_fit = bool(np.isfinite(p_lof) and p_lof < 0.05)
+
+    # Tabelle ausgeben
+    rows = [
+        ("Pure Error", ss_pure, df_pure, ms_pure, "—", "—"),
+        ("Lack of Fit", ss_lof, df_lof, ms_lof,
+         f"{f_stat:.3f}" if np.isfinite(f_stat) else "—",
+         f"{p_lof:.3f}" if np.isfinite(p_lof) else "—"),
+        ("Residual gesamt", ss_resid, df_resid, ss_resid / df_resid if df_resid else float("nan"),
+         "—", "—"),
+    ]
+    rows_html = "".join(
+        f"<tr><td style='padding:6px;'>{name}</td>"
+        f"<td style='padding:6px; text-align:right;'>{ss:.2f}</td>"
+        f"<td style='padding:6px; text-align:right;'>{dfree}</td>"
+        f"<td style='padding:6px; text-align:right;'>{ms:.3f}</td>"
+        f"<td style='padding:6px; text-align:right;'>{f}</td>"
+        f"<td style='padding:6px; text-align:right;'>{p}</td></tr>"
+        for name, ss, dfree, ms, f, p in rows
+    )
+    display(HTML(f"""
+    <h4>Lack-of-Fit-F-Test (mit Pure-Error-Zerlegung)</h4>
+    <table style="border-collapse:collapse; width:90%; border:1px solid #E5E7EB; margin:8px 0;">
+        <tr style="background:{LIGHT_BLUE};">
+            <th style="padding:6px; text-align:left;">Quelle</th>
+            <th style="padding:6px;">SS</th>
+            <th style="padding:6px;">df</th>
+            <th style="padding:6px;">MS</th>
+            <th style="padding:6px;">F</th>
+            <th style="padding:6px;">p</th>
+        </tr>
+        {rows_html}
+    </table>
+    <p style="font-size:0.9em; color:{GRAY};">
+        Pure Error stammt aus {n_replikate} Setting{'s' if n_replikate != 1 else ''}
+        mit Wiederholungen ({df_pure} Freiheitsgrade).
+        F = MS_LOF / MS_Pure prüft, ob die Modell-Restabweichung größer ist als
+        das reine Mess-/Wiederholrauschen.
+    </p>"""))
+
+    if lack_of_fit:
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {RED}; background:#FEE2E2;
+                     border-radius:4px; margin:8px 0;">
+            ❌ <strong>Lack of Fit signifikant (p={p_lof:.3f}):</strong>
+            Die Modell-Residuen sind systematisch größer als das reine
+            Wiederhol-Rauschen. Das Modell <em>verfehlt</em> die Realität —
+            entweder fehlt ein Term (Quadrat, Wechselwirkung) oder ein wichtiger
+            Faktor wurde nicht erfasst. Vorhersagen sind mit Vorbehalt zu lesen.
+        </div>"""))
+    else:
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {GREEN}; background:{LIGHT_GREEN};
+                     border-radius:4px; margin:8px 0;">
+            ✅ <strong>Kein Lack of Fit (p={p_lof:.3f}):</strong>
+            Die Modell-Residuen sind nicht größer als das reine Wiederhol-Rauschen.
+            Soweit aus diesem DoE erkennbar, beschreibt das Modell die Daten korrekt.
         </div>"""))
 
-    return {
+    if cp_info is not None and cp_info["kruemmung"]:
+        display(HTML(f"""
+        <div style="padding:10px; border-left:4px solid {ORANGE}; background:{LIGHT_YELLOW};
+                     border-radius:4px; margin:8px 0;">
+            ⚠️ <strong>Zusätzlicher Krümmungshinweis (Centerpoints):</strong>
+            Centerpoint-Mittelwert weicht von der Modellvorhersage ab
+            (p={cp_info['p_value']:.3f}). Quadratische Terme bzw. CCD-Erweiterung erwägen.
+        </div>"""))
+
+    ergebnis.update({
         "test_moeglich": True,
-        "cp_mean": cp_mean,
-        "pred_at_center": pred_at_center,
-        "t_stat": t_stat,
-        "p_value": p_value,
-        "kruemmung": kruemmung,
-    }
+        "n_settings": k_settings,
+        "n_settings_mit_replikat": n_replikate,
+        "ss_pure": ss_pure,
+        "df_pure": df_pure,
+        "ss_lof": ss_lof,
+        "df_lof": df_lof,
+        "ss_resid": ss_resid,
+        "df_resid": df_resid,
+        "ms_pure": ms_pure,
+        "ms_lof": ms_lof,
+        "f_stat": f_stat,
+        "p_value": p_lof,
+        "lack_of_fit": lack_of_fit,
+    })
+    if cp_info is not None:
+        ergebnis["centerpoint_check"] = cp_info
+        # Rückwärtskompatibel zu altem Aufrufpattern (Tests/Notebook):
+        ergebnis.setdefault("cp_mean", cp_info["cp_mean"])
+        ergebnis.setdefault("pred_at_center", cp_info["pred_at_center"])
+        ergebnis.setdefault("kruemmung", cp_info["kruemmung"])
+    return ergebnis
 
 
 def plot_residuen(modell) -> plt.Figure:
@@ -2298,13 +2785,111 @@ def plot_kontur_varianz_transmitted(modell, faktoren: List[Dict],
     return fig
 
 
-def _transmitted_variance(x_coded, modell, sigma_setting=0.1):
-    """Berechnet die übertragene Varianz an einem Punkt (für Optimierung)."""
+def sigma_msa_aus_projekt(projekt) -> Optional[float]:
+    """Liefert eine σ_MSA-Schätzung (cm) aus den MEASURE-Ergebnissen.
+
+    Bevorzugt σ_GRR (Mess- und Reproduzierbarkeitsstreuung des Messsystems aus
+    Gage R&R). Fällt zurück auf den Mittelwert der Type-1-Repeatabilities,
+    falls Gage R&R nicht ausgewertet wurde. Liefert ``None``, wenn keine
+    MSA-Daten vorhanden sind — die Aufrufer fallen dann auf das ursprüngliche
+    Modell-PI zurück.
+    """
+    grr = getattr(projekt, "msa_grr", None)
+    if grr:
+        s = grr.get("sigma_grr") if isinstance(grr, dict) else None
+        try:
+            s_f = float(s) if s is not None else None
+        except (TypeError, ValueError):
+            s_f = None
+        if s_f is not None and np.isfinite(s_f) and s_f > 0:
+            return s_f
+    t1 = getattr(projekt, "msa_type1", None)
+    if isinstance(t1, dict) and t1:
+        repeat = []
+        for v in t1.values():
+            if isinstance(v, dict) and v.get("repeatability") is not None:
+                try:
+                    r = float(v["repeatability"])
+                except (TypeError, ValueError):
+                    continue
+                if np.isfinite(r) and r > 0:
+                    repeat.append(r)
+        if repeat:
+            return float(np.mean(repeat))
+    return None
+
+
+def _erweitere_pi_mit_msa(pi_low: float, pi_high: float, mu: float,
+                          modell, sigma_msa: Optional[float]) -> Tuple[float, float]:
+    """Verbreitert ein Vorhersageintervall quadratisch um σ_MSA.
+
+    Annahme: σ_MSA repräsentiert eine in den DoE-Residuen nicht (oder zu
+    wenig) enthaltene Streuung des Messsystems. Halbbreite_neu² =
+    Halbbreite_alt² + (t·σ_MSA)². Liefert das ursprüngliche PI zurück, wenn
+    σ_MSA fehlt oder ≤ 0 ist.
+    """
+    if sigma_msa is None:
+        return float(pi_low), float(pi_high)
+    try:
+        s = float(sigma_msa)
+    except (TypeError, ValueError):
+        return float(pi_low), float(pi_high)
+    if not np.isfinite(s) or s <= 0:
+        return float(pi_low), float(pi_high)
+    half = (float(pi_high) - float(pi_low)) / 2.0
+    df_r = int(getattr(modell, "df_resid", 0) or 0)
+    if df_r < 1:
+        t_crit = 1.96
+    else:
+        try:
+            t_crit = float(stats.t.ppf(0.975, df_r))
+        except Exception:
+            t_crit = 1.96
+    half_neu = float(np.sqrt(half * half + (t_crit * s) ** 2))
+    return float(mu) - half_neu, float(mu) + half_neu
+
+
+def _basis_praediktoren(modell, x_coded) -> pd.DataFrame:
+    """Basis-Spalten für die formelbasierte Vorhersage an einem kodierten Punkt.
+
+    Liefert Haupteffekte, x²-Spalten und ggf. den globalen Krümmungsterm
+    (Mittel der x² über die Krümmungs-Faktoren). Interaktionsterme berechnet
+    patsy aus den Basis-Spalten selbst — sie müssen nicht mitgegeben werden.
+    """
+    fn = modell._faktor_namen
+    d = {name: float(x_coded[i]) for i, name in enumerate(fn)}
+    for i, name in enumerate(fn):
+        d[f"{name}_sq"] = float(x_coded[i]) ** 2
+    kr = getattr(modell, "_kruemmung", None)
+    if kr and kr.get("im_modell"):
+        idx = {name: i for i, name in enumerate(fn)}
+        basen = [b for b in kr.get("faktoren", []) if b in idx]
+        if basen:
+            d["Kruemmung"] = float(np.mean([x_coded[idx[b]] ** 2
+                                            for b in basen]))
+    return pd.DataFrame([d])
+
+
+def _transmitted_variance(x_coded, modell, sigma_setting=0.1, sigma_msa: float = 0.0):
+    """Berechnet die übertragene Varianz an einem Punkt (für Optimierung).
+
+    sigma_setting ist die Einstell-Unsicherheit in **kodierten** Einheiten
+    (Default 0.1 ≙ 5 % der DoE-Halbbreite). Wird per Gradient propagiert.
+
+    sigma_msa ist die Mess-/Reproduzierbarkeits-σ (cm) aus MEASURE; sie wird
+    als unabhängige Streuung quadratisch zur Modell-Restvarianz addiert.
+    """
     fn = modell._faktor_namen
     params = modell.params
 
     def get_beta(name):
         return params.get(name, 0.0)
+
+    # Globaler Krümmungsterm: Kruemmung = mean(x_i²) über m Faktoren
+    # → d(Kruemmung)/dx_k = 2·x_k / m für beteiligte Faktoren
+    kr = getattr(modell, "_kruemmung", None)
+    kr_faktoren = (kr.get("faktoren", []) if (kr and kr.get("im_modell")) else [])
+    kr_beta = get_beta("Kruemmung") if "Kruemmung" in params.index else 0.0
 
     total = 0.0
     for k in range(len(fn)):
@@ -2314,6 +2899,9 @@ def _transmitted_variance(x_coded, modell, sigma_setting=0.1):
         sq_name = f"{fn[k]}_sq"
         if sq_name in params.index:
             dy_dxk += 2.0 * get_beta(sq_name) * x_coded[k]
+        # Globaler Krümmungsterm
+        if kr_beta and fn[k] in kr_faktoren:
+            dy_dxk += 2.0 * kr_beta * x_coded[k] / len(kr_faktoren)
         # Interaktionsterme
         for j in range(len(fn)):
             if j == k:
@@ -2323,14 +2911,24 @@ def _transmitted_variance(x_coded, modell, sigma_setting=0.1):
             beta_int = get_beta(col1) if col1 in params.index else get_beta(col2)
             dy_dxk += beta_int * x_coded[j]
         total += dy_dxk**2 * sigma_setting**2
-    return total + modell.mse_resid
+
+    msa_term = 0.0
+    try:
+        if sigma_msa is not None:
+            s = float(sigma_msa)
+            if np.isfinite(s) and s > 0:
+                msa_term = s * s
+    except (TypeError, ValueError):
+        msa_term = 0.0
+    return total + modell.mse_resid + msa_term
 
 
 def optimiere_einstellungen(modell, zielweite: float,
                             faktoren: List[Dict],
                             strategie: str = "mittelwert",
                             lambda_gewicht: float = 0.01,
-                            sigma_setting: float = 0.1) -> Dict:
+                            sigma_setting: float = 0.1,
+                            sigma_msa: Optional[float] = None) -> Dict:
     """
     Optimiert die Faktoreinstellungen.
 
@@ -2342,37 +2940,14 @@ def optimiere_einstellungen(modell, zielweite: float,
     fn = modell._faktor_namen
 
     def _predict_at(x_coded):
-        """Vorhersage an einem Punkt (mit 2FI, optionalen 3FI und quadratischen Termen)."""
-        pred_dict = {name: val for name, val in zip(fn, x_coded)}
-        # Quadratische Terme
-        for i, name in enumerate(fn):
-            sq_name = f"{name}_sq"
-            if sq_name in modell.params.index:
-                pred_dict[sq_name] = x_coded[i] ** 2
-        # 2-Faktor-Interaktionen
-        for i in range(len(fn)):
-            for j in range(i + 1, len(fn)):
-                col_name = f"{fn[i]}:{fn[j]}"
-                if col_name in modell.params.index:
-                    pred_dict[col_name] = x_coded[i] * x_coded[j]
-        # 3-Faktor-Interaktionen
-        for i in range(len(fn)):
-            for j in range(i + 1, len(fn)):
-                for k_ in range(j + 1, len(fn)):
-                    col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
-                    if col_name in modell.params.index:
-                        pred_dict[col_name] = x_coded[i] * x_coded[j] * x_coded[k_]
-        pred_df = pd.DataFrame([pred_dict])
-        pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
-                                   fill_value=0)
-        import statsmodels.api as sm
-        pred_df = sm.add_constant(pred_df)
-        return modell.predict(pred_df).values[0]
+        """Vorhersage an einem Punkt (patsy berechnet Interaktionen selbst)."""
+        return float(modell.predict(_basis_praediktoren(modell, x_coded)).values[0])
 
     def objective(x_coded):
         pred = _predict_at(x_coded)
         mean_loss = (pred - zielweite) ** 2
-        var_loss = _transmitted_variance(x_coded, modell, sigma_setting)
+        var_loss = _transmitted_variance(x_coded, modell, sigma_setting,
+                                         sigma_msa=sigma_msa or 0.0)
 
         if strategie == "mittelwert":
             return mean_loss
@@ -2403,35 +2978,20 @@ def optimiere_einstellungen(modell, zielweite: float,
         }
 
     # Vorhersage + Intervall
-    pred_dict = {name: val for name, val in zip(fn, optimal_coded)}
-    for i, name in enumerate(fn):
-        sq_name = f"{name}_sq"
-        if sq_name in modell.params.index:
-            pred_dict[sq_name] = optimal_coded[i] ** 2
-    for i in range(len(fn)):
-        for j in range(i + 1, len(fn)):
-            col_name = f"{fn[i]}:{fn[j]}"
-            if col_name in modell.params.index:
-                pred_dict[col_name] = optimal_coded[i] * optimal_coded[j]
-    for i in range(len(fn)):
-        for j in range(i + 1, len(fn)):
-            for k_ in range(j + 1, len(fn)):
-                col_name = f"{fn[i]}:{fn[j]}:{fn[k_]}"
-                if col_name in modell.params.index:
-                    pred_dict[col_name] = optimal_coded[i] * optimal_coded[j] * optimal_coded[k_]
-    pred_df = pd.DataFrame([pred_dict])
-    pred_df = pred_df.reindex(columns=[c for c in modell.params.index if c != "Intercept"],
-                               fill_value=0)
-    import statsmodels.api as sm
-    pred_df = sm.add_constant(pred_df)
-
+    pred_df = _basis_praediktoren(modell, optimal_coded)
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]
     pred_ci = prediction.conf_int(alpha=0.05)[0]
     pred_pi = prediction.summary_frame(alpha=0.05)
 
+    pi_low_modell = float(pred_pi["obs_ci_lower"].values[0])
+    pi_high_modell = float(pred_pi["obs_ci_upper"].values[0])
+    pi_low, pi_high = _erweitere_pi_mit_msa(pi_low_modell, pi_high_modell,
+                                            float(pred_value), modell, sigma_msa)
+
     # Erwartete Streuung am optimalen Punkt
-    sigma_opt = np.sqrt(_transmitted_variance(optimal_coded, modell, sigma_setting))
+    sigma_opt = np.sqrt(_transmitted_variance(optimal_coded, modell, sigma_setting,
+                                              sigma_msa=sigma_msa or 0.0))
 
     strategie_label = {
         "mittelwert": "Nur Mittelwert (Accuracy)",
@@ -2444,8 +3004,11 @@ def optimiere_einstellungen(modell, zielweite: float,
         "vorhersage": pred_value,
         "ci_low": pred_ci[0],
         "ci_high": pred_ci[1],
-        "pi_low": pred_pi["obs_ci_lower"].values[0],
-        "pi_high": pred_pi["obs_ci_upper"].values[0],
+        "pi_low": pi_low,
+        "pi_high": pi_high,
+        "pi_low_modell": pi_low_modell,
+        "pi_high_modell": pi_high_modell,
+        "sigma_msa": float(sigma_msa) if sigma_msa else None,
         "zielweite": zielweite,
         "strategie": strategie,
         "strategie_label": strategie_label,
@@ -2473,6 +3036,17 @@ def zeige_optimierung(ergebnis: Dict):
         sigma_html = f"""<p style="margin:4px 0;">
             <strong>Erwartete Streuung (Fehlerfortpflanzung):</strong>
             σ ≈ {ergebnis['sigma_transmitted']:.1f} cm</p>"""
+    msa_html = ""
+    if ergebnis.get("sigma_msa"):
+        pi_lo_m = ergebnis.get("pi_low_modell")
+        pi_hi_m = ergebnis.get("pi_high_modell")
+        modell_pi = ""
+        if pi_lo_m is not None and pi_hi_m is not None:
+            modell_pi = (f" Modell-PI ohne MSA wäre [{pi_lo_m:.1f}, {pi_hi_m:.1f}] cm.")
+        msa_html = f"""<p style="margin:4px 0; font-size:0.9em; color:{GRAY};">
+            ℹ️ Vorhersageintervall ist um die Mess­system­streuung
+            σ_MSA = {ergebnis['sigma_msa']:.1f} cm aus MEASURE verbreitert
+            (quadratisch addiert).{modell_pi}</p>"""
 
     html = f"""
     <div style="padding:12px; background:{LIGHT_GREEN}; border-radius:6px; margin:10px 0;
@@ -2494,6 +3068,7 @@ def zeige_optimierung(ergebnis: Dict):
             <strong>Zielweite:</strong> {ergebnis['zielweite']:.0f} cm
         </p>
         {sigma_html}
+        {msa_html}
     </div>"""
     display(HTML(html))
 
@@ -2525,6 +3100,31 @@ def zeige_regressionsformel(modell, faktoren: List[Dict]):
         vorzeichen = "+" if beta > 0 else "-"
         latex += f" {vorzeichen} {abs(beta):.2f} \\cdot x_{{\\text{{{anzeige}}}}}"
 
+    # Quadratische Terme (RSM)
+    for name in fn:
+        beta = params.get(f"{name}_sq", 0.0)
+        if abs(beta) < 1e-10:
+            continue
+        anzeige = name_map.get(name, name)
+        vorzeichen = "+" if beta > 0 else "-"
+        latex += (f" {vorzeichen} {abs(beta):.2f} \\cdot "
+                  f"x_{{\\text{{{anzeige}}}}}^2")
+
+    # Globaler Krümmungsterm (2-Level-Design + Centerpoints)
+    kruemmung_hinweis = ""
+    beta_kr = params.get("Kruemmung", 0.0)
+    if abs(beta_kr) > 1e-10:
+        vorzeichen = "+" if beta_kr > 0 else "-"
+        latex += f" {vorzeichen} {abs(beta_kr):.2f} \\cdot \\overline{{x^2}}"
+        kr = getattr(modell, "_kruemmung", None)
+        namen_kr = ", ".join(name_map.get(b, b)
+                             for b in (kr.get("faktoren", []) if kr else []))
+        kruemmung_hinweis = (
+            f"<p style='margin:8px 0 4px 0; font-size:0.9em; color:{GRAY};'>"
+            f"x̄² = Mittelwert der quadrierten kodierten Werte ({namen_kr}) — "
+            f"gemeinsamer Krümmungsterm, da die Krümmung mit diesem Design "
+            f"keinem einzelnen Faktor zugeordnet werden kann.</p>")
+
     # Interaktionen
     for i in range(len(fn)):
         for j in range(i + 1, len(fn)):
@@ -2537,6 +3137,22 @@ def zeige_regressionsformel(modell, faktoren: List[Dict]):
             vorzeichen = "+" if beta > 0 else "-"
             latex += (f" {vorzeichen} {abs(beta):.2f} \\cdot "
                       f"x_{{\\text{{{n1}}}}} \\cdot x_{{\\text{{{n2}}}}}")
+
+    # 3-Faktor-Interaktionen (falls im Modell)
+    for i in range(len(fn)):
+        for j in range(i + 1, len(fn)):
+            for k_ in range(j + 1, len(fn)):
+                col = f"{fn[i]}:{fn[j]}:{fn[k_]}"
+                beta = params.get(col, 0.0)
+                if abs(beta) < 1e-10:
+                    continue
+                n1 = name_map.get(fn[i], fn[i])
+                n2 = name_map.get(fn[j], fn[j])
+                n3 = name_map.get(fn[k_], fn[k_])
+                vorzeichen = "+" if beta > 0 else "-"
+                latex += (f" {vorzeichen} {abs(beta):.2f} \\cdot "
+                          f"x_{{\\text{{{n1}}}}} \\cdot x_{{\\text{{{n2}}}}}"
+                          f" \\cdot x_{{\\text{{{n3}}}}}")
 
     # Kodierungstabelle
     kodierung_rows = ""
@@ -2563,6 +3179,7 @@ def zeige_regressionsformel(modell, faktoren: List[Dict]):
                     border-radius:6px; font-size:1.1em; overflow-x:auto;">
             $${latex}$$
         </div>
+        {kruemmung_hinweis}
         <p style="margin:12px 0 4px 0; font-size:0.9em; color:{GRAY};">
             Alle x-Werte sind <strong>kodiert</strong> (−1 = niedrig, +1 = hoch).
             ŷ = vorhergesagte Wurfweite in cm.
@@ -2590,12 +3207,15 @@ def zeige_regressionsformel(modell, faktoren: List[Dict]):
 
 def prognostiziere(modell, faktoren: List[Dict],
                    werte: Dict[str, float],
-                   sigma_setting: float = 0.1) -> Dict:
+                   sigma_setting: float = 0.1,
+                   sigma_msa: Optional[float] = None) -> Dict:
     """
     Prognosetool: Vorhersage für beliebige Faktoreinstellungen.
 
     werte: Dict mit Faktornamen als Keys und kodierten Werten (-1 bis +1)
            ODER Originalwerten (werden automatisch kodiert wenn |Wert| > 1.5).
+    sigma_msa: optionale Mess-/Reproduzierbarkeits-σ (cm) aus MEASURE; weitet
+        das Vorhersageintervall, wenn das DoE diese Streuung nicht abgedeckt hat.
     """
     fn = modell._faktor_namen
 
@@ -2614,36 +3234,41 @@ def prognostiziere(modell, faktoren: List[Dict],
         else:
             x_coded[i] = val
 
-    # Vorhersage via statsmodels
-    import statsmodels.api as sm
-    pred_dict = {name: x_coded[idx] for idx, name in enumerate(fn)}
-    for i in range(len(fn)):
-        for j in range(i + 1, len(fn)):
-            col = f"{fn[i]}:{fn[j]}"
-            if col in modell.params.index:
-                pred_dict[col] = x_coded[i] * x_coded[j]
-    pred_df = pd.DataFrame([pred_dict])
-    pred_df = pred_df.reindex(
-        columns=[c for c in modell.params.index if c != "Intercept"],
-        fill_value=0
-    )
-    pred_df = sm.add_constant(pred_df)
+    # Vorhersage via statsmodels: Das Modell ist formelbasiert (patsy) —
+    # es genügt, alle Basis-Spalten zu liefern (Haupteffekte, x²-Terme,
+    # ggf. globaler Krümmungsterm); Interaktionen berechnet patsy selbst.
+    pred_df = _basis_praediktoren(modell, x_coded)
 
     prediction = modell.get_prediction(pred_df)
     pred_value = prediction.predicted_mean[0]
     summary = prediction.summary_frame(alpha=0.05)
 
-    # Erwartete Streuung
-    sigma = np.sqrt(_transmitted_variance(x_coded, modell, sigma_setting))
+    pi_low_modell = float(summary["obs_ci_lower"].values[0])
+    pi_high_modell = float(summary["obs_ci_upper"].values[0])
+    pi_low, pi_high = _erweitere_pi_mit_msa(pi_low_modell, pi_high_modell,
+                                            float(pred_value), modell, sigma_msa)
+
+    # Erwartete Streuung (inkl. σ_MSA, wenn übergeben)
+    sigma = np.sqrt(_transmitted_variance(x_coded, modell, sigma_setting,
+                                          sigma_msa=sigma_msa or 0.0))
+
+    # Extrapolations-Check (Fix #5): Faktoren außerhalb [-1, +1] sind außerhalb des DoE-Raums
+    extrapolation = [(faktoren[i]["name"], float(x_coded[i]))
+                     for i in range(min(len(faktoren), len(x_coded)))
+                     if abs(x_coded[i]) > 1.0]
 
     return {
         "vorhersage": pred_value,
         "ci_low": summary["mean_ci_lower"].values[0],
         "ci_high": summary["mean_ci_upper"].values[0],
-        "pi_low": summary["obs_ci_lower"].values[0],
-        "pi_high": summary["obs_ci_upper"].values[0],
+        "pi_low": pi_low,
+        "pi_high": pi_high,
+        "pi_low_modell": pi_low_modell,
+        "pi_high_modell": pi_high_modell,
         "sigma": sigma,
+        "sigma_msa": float(sigma_msa) if sigma_msa else None,
         "x_coded": x_coded,
+        "extrapolation": extrapolation,
     }
 
 
@@ -2681,6 +3306,43 @@ def zeige_prognose(ergebnis: Dict, faktoren: List[Dict],
             <span style="color:{farbe}; font-weight:bold;">{abw:+.1f} cm</span>
         </p>"""
 
+    # Extrapolations-Warnung (Fix #5): Faktoren außerhalb des DoE-Designraums
+    extrapol_html = ""
+    extrapol = ergebnis.get("extrapolation") or []
+    if extrapol:
+        # Streng (>1.2): rote Sperre. Gelb (>1.0): Warnung.
+        streng = [(n, v) for n, v in extrapol if abs(v) > 1.2]
+        zeile = ", ".join(f"{n} (kodiert {v:+.2f})" for n, v in extrapol)
+        if streng:
+            extrapol_html = f"""
+            <div style="margin:8px 0; padding:10px; border-left:4px solid {RED};
+                        background:#FEE2E2; border-radius:4px;">
+                ❌ <strong>Starke Extrapolation:</strong> {zeile}.
+                Diese Werte liegen weit außerhalb des DoE-Designraums (|kodiert| > 1,2) –
+                das Modell ist hier <strong>nicht belegt</strong>. Vorhersage ignorieren.
+            </div>"""
+        else:
+            extrapol_html = f"""
+            <div style="margin:8px 0; padding:10px; border-left:4px solid {ORANGE};
+                        background:{LIGHT_YELLOW}; border-radius:4px;">
+                ⚠️ <strong>Extrapolation:</strong> {zeile} liegt außerhalb der DoE-Grenzen
+                ([-1, +1]). Vorhersage hier mit Vorsicht lesen – die Modellgüte
+                wurde nur innerhalb des Designraums geprüft.
+            </div>"""
+
+    # Hinweis auf MSA-Verbreiterung
+    msa_html = ""
+    if ergebnis.get("sigma_msa"):
+        pi_lo_m = ergebnis.get("pi_low_modell")
+        pi_hi_m = ergebnis.get("pi_high_modell")
+        modell_pi = ""
+        if pi_lo_m is not None and pi_hi_m is not None:
+            modell_pi = (f"<br>Modell-PI ohne MSA: [{pi_lo_m:.1f}, {pi_hi_m:.1f}] cm")
+        msa_html = f"""
+        <p style="margin:4px 0; font-size:0.85em; color:{GRAY};">
+            ℹ️ PI inkl. σ_MSA = {ergebnis['sigma_msa']:.1f} cm aus MEASURE.{modell_pi}
+        </p>"""
+
     html = f"""
     <div style="padding:14px; background:#F0F9FF; border:1px solid #BFDBFE;
                 border-radius:8px; margin:10px 0;">
@@ -2710,15 +3372,18 @@ def zeige_prognose(ergebnis: Dict, faktoren: List[Dict],
             <p style="margin:4px 0;">
                 <strong>Erwartete Streuung:</strong>
                 σ ≈ {ergebnis['sigma']:.1f} cm</p>
+            {msa_html}
             {ziel_html}
         </div>
+        {extrapol_html}
     </div>"""
     display(HTML(html))
 
 
 def vergleiche_optimierungen(modell, zielweite: float, faktoren: List[Dict],
                               lambda_werte: List[float] = None,
-                              sigma_setting: float = 0.1):
+                              sigma_setting: float = 0.1,
+                              sigma_msa: Optional[float] = None):
     """Vergleicht die drei Optimierungsstrategien in einer Übersichtstabelle."""
     if lambda_werte is None:
         lambda_werte = [0.005, 0.01, 0.05]
@@ -2726,17 +3391,20 @@ def vergleiche_optimierungen(modell, zielweite: float, faktoren: List[Dict],
     ergebnisse = []
     # Nur Mittelwert
     e_mean = optimiere_einstellungen(modell, zielweite, faktoren,
-                                     strategie="mittelwert", sigma_setting=sigma_setting)
+                                     strategie="mittelwert", sigma_setting=sigma_setting,
+                                     sigma_msa=sigma_msa)
     ergebnisse.append(e_mean)
     # Nur Varianz
     e_var = optimiere_einstellungen(modell, zielweite, faktoren,
-                                    strategie="varianz", sigma_setting=sigma_setting)
+                                    strategie="varianz", sigma_setting=sigma_setting,
+                                    sigma_msa=sigma_msa)
     ergebnisse.append(e_var)
     # Dual mit verschiedenen λ
     for lam in lambda_werte:
         e_dual = optimiere_einstellungen(modell, zielweite, faktoren,
                                           strategie="dual", lambda_gewicht=lam,
-                                          sigma_setting=sigma_setting)
+                                          sigma_setting=sigma_setting,
+                                          sigma_msa=sigma_msa)
         ergebnisse.append(e_dual)
 
     # Tabelle
@@ -2860,35 +3528,89 @@ def lade_konfirmation_aus_excel(filepath: str) -> np.ndarray:
 
 def analysiere_konfirmation(wuerfe: np.ndarray, vorhersage: float,
                             pi_low: float, pi_high: float,
-                            zielweite: float, toleranz: float) -> Dict:
-    """Analysiert die Konfirmationswürfe."""
-    mu = np.mean(wuerfe)
-    sigma = np.std(wuerfe, ddof=1) if len(wuerfe) > 1 else 0
+                            zielweite: float, toleranz: float,
+                            ci_low: Optional[float] = None,
+                            ci_high: Optional[float] = None) -> Dict:
+    """Analysiert die Konfirmationswürfe.
 
-    # Mittelwert im Vorhersagebereich?
-    in_pred = pi_low <= mu <= pi_high
+    Trennt sauber zwei Aussagen, die früher vermischt waren:
 
-    # Anteil innerhalb Toleranz
-    in_tol = np.sum(np.abs(wuerfe - zielweite) <= toleranz)
-    pct_in_tol = in_tol / len(wuerfe) * 100
+    (a) **Erwartungswert-Check** (Mittelwert): Liegt der Mittelwert der
+        Konfirmationswürfe im **Konfidenzintervall** der Modellvorhersage?
+        Das prüft, ob das Modell den Mittelwert richtig vorhersagt.
 
-    # Bewertung
-    if in_pred and pct_in_tol >= 80:
-        bewertung = "✅ Konfirmation erfolgreich"
-        detail = "Mittelwert im Vorhersagebereich und ≥80% der Würfe in Toleranz"
-    elif in_pred:
-        bewertung = "⚠️ Mittelwert passt, aber hohe Streuung"
-        detail = f"Mittelwert im Vorhersagebereich, aber nur {pct_in_tol:.0f}% in Toleranz"
+    (b) **Einzelwurf-Check** (Vorhersagebereich): Wieviel Prozent der einzelnen
+        Würfe liegen im **Vorhersageintervall** (PI)? Das prüft, ob das Modell
+        die *Streuung* (= Einzelwurf-Vorhersage) korrekt einschätzt — bei
+        einem realistischen 95-%-PI sollten ≈ 95 % der Würfe darin liegen.
+
+    ci_low/ci_high: Konfidenzintervall (für Mittelwert). Wenn nicht übergeben,
+        wird ersatzweise das PI genutzt (alte Aufruf-Signatur).
+    """
+    wuerfe = np.asarray(wuerfe, dtype=float)
+    n = int(len(wuerfe))
+    mu = float(np.mean(wuerfe)) if n else float("nan")
+    sigma = float(np.std(wuerfe, ddof=1)) if n > 1 else 0.0
+
+    # (a) Mittelwert im Konfidenzintervall (Erwartungswert)
+    if ci_low is None or ci_high is None:
+        # Fallback auf PI – ältere Aufrufe ohne CI
+        ci_low_eff, ci_high_eff = float(pi_low), float(pi_high)
+        ci_quelle = "PI (CI nicht übergeben)"
     else:
-        bewertung = "❌ Modell hat nicht getroffen"
-        detail = f"Mittelwert ({mu:.1f} cm) liegt außerhalb des Vorhersagebereichs [{pi_low:.1f}, {pi_high:.1f}]"
+        ci_low_eff, ci_high_eff = float(ci_low), float(ci_high)
+        ci_quelle = "CI"
+    in_ci = bool(ci_low_eff <= mu <= ci_high_eff)
+
+    # (b) Anteil Einzelwürfe im Vorhersageintervall (Streuungs-Check)
+    pi_low_f, pi_high_f = float(pi_low), float(pi_high)
+    in_pi_count = int(np.sum((wuerfe >= pi_low_f) & (wuerfe <= pi_high_f)))
+    pct_in_pi = (in_pi_count / n * 100.0) if n else 0.0
+
+    # Toleranz-Check (DMAIC-Prozesssicht, unabhängig vom Modell)
+    in_tol = int(np.sum(np.abs(wuerfe - zielweite) <= toleranz))
+    pct_in_tol = (in_tol / n * 100.0) if n else 0.0
+
+    # Drei Checks: (a) Erwartungswert (CI), (b) Streuung passt zum Modell (PI),
+    # (c) Prozess in Spec (Toleranz). ✅ nur wenn alle drei passen.
+    streuung_ok = pct_in_pi >= 80.0   # ein 95%-PI sollte ≥ 80 % der Würfe enthalten
+    toleranz_ok = pct_in_tol >= 80.0  # Prozesssicht: Spec ± Toleranz
+    if in_ci and streuung_ok and toleranz_ok:
+        bewertung = "✅ Konfirmation erfolgreich"
+        detail = ("Mittelwert im Konfidenzintervall, Einzelwurf-Streuung passt "
+                  "zum Modell-PI, und ≥ 80 % der Würfe in Toleranz.")
+    elif not in_ci:
+        bewertung = "❌ Mittelwert verschoben"
+        detail = (f"Mittelwert ({mu:.1f} cm) liegt außerhalb des CI "
+                  f"[{ci_low_eff:.1f}, {ci_high_eff:.1f}] – "
+                  f"das Modell sagt den Erwartungswert falsch voraus.")
+    elif not streuung_ok:
+        bewertung = "⚠️ Streuung größer als vom Modell vorhergesagt"
+        detail = (f"Mittelwert im CI, aber nur {pct_in_pi:.0f} % der Würfe im PI – "
+                  f"echte Einzelwurf-Streuung ist breiter als das Modell annimmt "
+                  f"(Toleranz-Anteil: {pct_in_tol:.0f} %).")
+    else:
+        # in_ci und streuung_ok, aber toleranz_ok nicht
+        bewertung = "⚠️ Mittelwert passt, aber hohe Streuung"
+        detail = (f"Mittelwert im CI und Streuung deckt sich mit dem Modell, "
+                  f"aber nur {pct_in_tol:.0f} % der Würfe in Toleranz – Prozess "
+                  f"trifft die Spec-Vorgabe nicht.")
 
     return {
         "mean": mu,
         "std": sigma,
-        "n": len(wuerfe),
-        "in_pred": in_pred,
+        "n": n,
+        "in_ci": in_ci,
+        "in_pred": in_ci,  # Rückwärtskompatibel
+        "ci_low": ci_low_eff,
+        "ci_high": ci_high_eff,
+        "ci_quelle": ci_quelle,
+        "pi_low": pi_low_f,
+        "pi_high": pi_high_f,
+        "pct_in_pi": pct_in_pi,
         "pct_in_tol": pct_in_tol,
+        "streuung_ok": streuung_ok,
+        "toleranz_ok": toleranz_ok,
         "bewertung": bewertung,
         "detail": detail,
         "vorhersage": vorhersage,
@@ -2896,17 +3618,51 @@ def analysiere_konfirmation(wuerfe: np.ndarray, vorhersage: float,
 
 
 def zeige_konfirmation(ergebnis: Dict):
-    """Zeigt die Konfirmationsergebnisse an."""
+    """Zeigt die Konfirmationsergebnisse an — Mittelwert- und Einzelwurf-Check getrennt."""
     farbe = GREEN if "✅" in ergebnis["bewertung"] else ORANGE if "⚠️" in ergebnis["bewertung"] else RED
+    pct_in_pi = ergebnis.get("pct_in_pi")
+    ci_lo = ergebnis.get("ci_low")
+    ci_hi = ergebnis.get("ci_high")
+    pi_lo = ergebnis.get("pi_low")
+    pi_hi = ergebnis.get("pi_high")
+    ci_check = "✅" if ergebnis.get("in_ci") else "❌"
+    pi_check = "✅" if ergebnis.get("streuung_ok") else "❌"
+
+    ci_zeile = ""
+    if ci_lo is not None and ci_hi is not None:
+        ci_zeile = (f"<tr><td style='padding:4px 8px;'>(a) Mittelwert im CI?</td>"
+                    f"<td style='padding:4px 8px;'>"
+                    f"Mittelwert {ergebnis['mean']:.1f} cm vs. CI "
+                    f"[{ci_lo:.1f}, {ci_hi:.1f}] cm</td>"
+                    f"<td style='padding:4px 8px; text-align:center;'>{ci_check}</td></tr>")
+    pi_zeile = ""
+    if pi_lo is not None and pi_hi is not None and pct_in_pi is not None:
+        pi_zeile = (f"<tr><td style='padding:4px 8px;'>(b) Einzelwürfe im PI?</td>"
+                    f"<td style='padding:4px 8px;'>"
+                    f"{pct_in_pi:.0f} % der Würfe in PI [{pi_lo:.1f}, {pi_hi:.1f}] cm "
+                    f"(Soll bei 95-%-PI: ≥ 80 %)</td>"
+                    f"<td style='padding:4px 8px; text-align:center;'>{pi_check}</td></tr>")
+
     html = f"""
     <div style="padding:12px; border-left:4px solid {farbe}; background:{farbe}11;
                 border-radius:4px; margin:10px 0;">
         <h4 style="margin:0;">{ergebnis['bewertung']}</h4>
         <p>{ergebnis['detail']}</p>
-        <p>
-            Modell-Vorhersage: <strong>{ergebnis['vorhersage']:.1f} cm</strong><br>
-            Tatsächlicher Mittelwert: <strong>{ergebnis['mean']:.1f} cm</strong> (σ = {ergebnis['std']:.1f} cm)<br>
-            Anteil in Toleranz: <strong>{ergebnis['pct_in_tol']:.0f}%</strong>
+        <table style="border-collapse:collapse; margin:6px 0; font-size:0.95em;">
+            <tr style="background:{LIGHT_BLUE};">
+                <th style="padding:4px 8px; text-align:left;">Check</th>
+                <th style="padding:4px 8px; text-align:left;">Wert</th>
+                <th style="padding:4px 8px;">OK?</th>
+            </tr>
+            {ci_zeile}
+            {pi_zeile}
+        </table>
+        <p style="margin:6px 0 0 0; font-size:0.92em;">
+            Modell-Vorhersage: <strong>{ergebnis['vorhersage']:.1f} cm</strong>
+            &middot; Tatsächlicher Mittelwert: <strong>{ergebnis['mean']:.1f} cm</strong>
+            (σ = {ergebnis['std']:.1f} cm, n = {ergebnis['n']})<br>
+            Anteil in Toleranz: <strong>{ergebnis.get('pct_in_tol', 0):.0f} %</strong>
+            (Prozesssicht – Spec ± Toleranz, unabhängig vom Modell)
         </p>
     </div>"""
     display(HTML(html))
@@ -3196,7 +3952,16 @@ def plot_vorher_nachher(baseline: np.ndarray, konfirmation: np.ndarray,
 # ═══════════════════════════════════════════════════════════════════
 
 def exportiere_phase_auf_drive(projekt: Projekt, phase: str = None):
-    """Exportiert alle bisherigen Ergebnisse in einen Phase-Unterordner auf Drive."""
+    """Sichert die Ergebnisse GENAU DIESER Phase in einen Phase-Unterordner.
+
+    Struktur auf Drive (identisch zur finalen ZIP):
+        <Gruppe>/<PHASE>/plots/*.png
+        <Gruppe>/<PHASE>/daten/*.csv
+        <Gruppe>/<PHASE>/zusammenfassung.txt
+
+    Figuren sind phasen-präfixiert benannt (z.B. "analyze_pareto") und werden
+    nach Präfix gefiltert — frühere Phasen tauchen hier nicht noch einmal auf.
+    """
     if phase is None:
         phase = _aktuelle_phase(projekt)
 
@@ -3206,51 +3971,63 @@ def exportiere_phase_auf_drive(projekt: Projekt, phase: str = None):
         return
 
     phase_dir = os.path.join(save_dir, phase)
-    os.makedirs(phase_dir, exist_ok=True)
+    plots_dir = os.path.join(phase_dir, "plots")
+    daten_dir = os.path.join(phase_dir, "daten")
+    os.makedirs(plots_dir, exist_ok=True)
+    os.makedirs(daten_dir, exist_ok=True)
 
+    praefix = phase.lower() + "_"
     dateien = []
 
-    # 1. Alle Figuren als PNG
+    # 1. Figuren dieser Phase als PNG
     for name, fig in projekt.figuren.items():
-        pfad = os.path.join(phase_dir, f"{name}.png")
-        fig.savefig(pfad, format="png", bbox_inches="tight", dpi=150, facecolor="white")
+        if not name.lower().startswith(praefix):
+            continue
+        fig.savefig(os.path.join(plots_dir, f"{name}.png"), format="png",
+                    bbox_inches="tight", dpi=150, facecolor="white")
         dateien.append(f"plots/{name}.png")
 
-    # 2. Alle CSVs
+    # 2. CSVs dieser Phase (Zuordnung über bekannten Namen, sonst Präfix)
+    _csv_phase = {"doe_ergebnisse": "ANALYZE"}
     for name, df in projekt.csv_daten.items():
-        pfad = os.path.join(phase_dir, f"{name}.csv")
-        df.to_csv(pfad, index=False)
+        ziel_phase = _csv_phase.get(name)
+        if ziel_phase is None and name.lower().startswith(praefix):
+            ziel_phase = phase
+        if ziel_phase != phase:
+            continue
+        df.to_csv(os.path.join(daten_dir, f"{name}.csv"), index=False)
         dateien.append(f"daten/{name}.csv")
 
-    # 3. Baseline-Daten
-    if len(projekt.baseline_wuerfe) > 0:
-        pfad = os.path.join(phase_dir, "baseline_wuerfe.csv")
+    # 3. Baseline-Daten (gehören zu MEASURE)
+    if phase == "MEASURE" and len(projekt.baseline_wuerfe) > 0:
         pd.DataFrame({"Wurf_Nr": range(1, len(projekt.baseline_wuerfe) + 1),
-                       "Weite_cm": projekt.baseline_wuerfe}).to_csv(pfad, index=False)
-        dateien.append("baseline_wuerfe.csv")
+                       "Weite_cm": projekt.baseline_wuerfe}).to_csv(
+            os.path.join(daten_dir, "baseline_wuerfe.csv"), index=False)
+        dateien.append("daten/baseline_wuerfe.csv")
 
-    # 4. Konfirmationsdaten
-    if len(projekt.konfirmation_wuerfe) > 0:
-        pfad = os.path.join(phase_dir, "konfirmation_wuerfe.csv")
+    # 4. Konfirmationsdaten (gehören zu IMPROVE)
+    if phase == "IMPROVE" and len(projekt.konfirmation_wuerfe) > 0:
         pd.DataFrame({"Wurf_Nr": range(1, len(projekt.konfirmation_wuerfe) + 1),
-                       "Weite_cm": projekt.konfirmation_wuerfe}).to_csv(pfad, index=False)
-        dateien.append("konfirmation_wuerfe.csv")
+                       "Weite_cm": projekt.konfirmation_wuerfe}).to_csv(
+            os.path.join(daten_dir, "konfirmation_wuerfe.csv"), index=False)
+        dateien.append("daten/konfirmation_wuerfe.csv")
 
-    # 5. Zusammenfassung
-    pfad = os.path.join(phase_dir, "zusammenfassung.txt")
-    with open(pfad, "w") as f:
+    # 5. Zusammenfassung (Projektstand bis einschließlich dieser Phase)
+    with open(os.path.join(phase_dir, "zusammenfassung.txt"), "w") as f:
         f.write(_erstelle_zusammenfassung(projekt))
     dateien.append("zusammenfassung.txt")
 
-    # 6. Fortschritt-JSON
+    # 6. Fortschritt-JSON (automatische Sicherung, liegt im Gruppen-Ordner)
     speichere_fortschritt(projekt)
 
-    print(f"💾 {len(dateien)} Dateien in Google Drive gespeichert:")
+    print(f"📦 Phase {phase} gesichert: {len(dateien)} Dateien auf Google Drive")
     print(f"   📂 {phase_dir}")
     for d in dateien[:8]:
         print(f"      • {d}")
     if len(dateien) > 8:
         print(f"      ... und {len(dateien) - 8} weitere")
+    print("   ℹ️ Das ist eine Sicherung — für die Abgabe zählt die finale "
+          "ZIP-Datei, die ihr ganz am Ende des Notebooks erstellt.")
 
 
 def exportiere_zip(projekt: Projekt, output_path: str = "DMAIC_Ergebnisse.zip") -> str:
@@ -3641,7 +4418,8 @@ def speichere_fortschritt(projekt: Projekt):
                 os.remove(tmp)
             raise
 
-        print(f"💾 Fortschritt gespeichert ({d['_phase']})")
+        print(f"🔄 Zwischenstand automatisch gesichert (dient nur der "
+              f"Wiederherstellung — keine Abgabe)")
     except Exception as e:
         print(f"⚠️ Speichern fehlgeschlagen: {e}")
 
@@ -3851,5 +4629,123 @@ def zeige_restore_zusammenfassung(projekt: Projekt):
         <div style="color:{BLUE};">
             <strong>Nächster Schritt:</strong> {naechstes}
         </div>
+    </div>"""
+    display(HTML(html))
+
+
+def zeige_phasen_checkpoint(projekt: Projekt, phase: str):
+    """Checkpoint am Phasenende: Was ist erreicht, was fehlt, wie geht's weiter.
+
+    Gleiche Optik wie der Restore-Überblick, aber auf EINE Phase fokussiert.
+    """
+    erledigt: List[str] = []
+    offen: List[str] = []
+
+    def _pruefe(ok: bool, text_ok: str, text_fehlt: str):
+        if ok:
+            erledigt.append(text_ok)
+        else:
+            offen.append(text_fehlt)
+
+    if phase == "DEFINE":
+        _pruefe(bool(projekt.faktoren),
+                f"Faktoren festgelegt: {len(projekt.faktoren)} "
+                f"({', '.join(f['name'] for f in projekt.faktoren)})",
+                "Faktoren fehlen — Zelle „Faktoren übernehmen“ ausführen")
+        _pruefe(projekt.zielweite is not None and projekt.zielweite > 0,
+                f"Zielweite: {projekt.zielweite:.0f} cm (±{projekt.toleranz:.0f} cm)",
+                "Zielweite fehlt")
+        _pruefe(len(projekt.vermessung_min_wuerfe) > 0 and len(projekt.vermessung_max_wuerfe) > 0,
+                "Katapult vermessen (Min/Max bekannt)",
+                "Min/Max-Vermessung fehlt")
+        _pruefe(bool(projekt.initiale_einstellung),
+                "Typische Einstellung per Annäherung finalisiert",
+                "Typische Einstellung fehlt (Annäherungs-Zellen)")
+        _pruefe(len(projekt.testwuerfe) > 0,
+                f"Testwürfe: {len(projekt.testwuerfe)} "
+                f"(μ={np.mean(projekt.testwuerfe):.1f} cm)" if len(projekt.testwuerfe) > 0 else "",
+                "Testwürfe fehlen")
+        naechstes = ("Weiter mit <strong>MEASURE</strong>: Erst das Messsystem "
+                     "prüfen (MSA), dann die Baseline werfen.")
+    elif phase == "MEASURE":
+        _pruefe(bool(projekt.msa_grr),
+                f"Messsystem geprüft: %GRR = {projekt.msa_grr.get('pct_grr', 0):.1f}% "
+                f"({projekt.msa_grr.get('bewertung', '')})" if projekt.msa_grr else "",
+                "Gage R&R fehlt — MSA-Excel hochladen und auswerten")
+        _pruefe(len(projekt.baseline_wuerfe) > 0,
+                f"Baseline: {len(projekt.baseline_wuerfe)} Würfe "
+                f"(μ={np.mean(projekt.baseline_wuerfe):.1f} cm, "
+                f"σ={np.std(projekt.baseline_wuerfe, ddof=1):.1f} cm)"
+                if len(projekt.baseline_wuerfe) > 0 else "",
+                "Baseline-Würfe fehlen")
+        naechstes = ("Weiter mit <strong>ANALYZE</strong>: Faktoren fürs DoE "
+                     "verfeinern, Versuchsplan generieren, Versuche durchführen.")
+    elif phase == "ANALYZE":
+        if projekt.versuchsplan is not None:
+            _typ = projekt.versuchsplan.attrs.get("design_typ", "")
+            _pruefe(True, f"Versuchsplan: {_typ}, {len(projekt.versuchsplan)} Runs", "")
+        else:
+            _pruefe(False, "", "Versuchsplan fehlt")
+        _pruefe(projekt.doe_ergebnisse is not None,
+                f"DoE-Ergebnisse: {len(projekt.doe_ergebnisse)} Würfe eingelesen"
+                if projekt.doe_ergebnisse is not None else "",
+                "DoE-Ergebnisse fehlen (Excel-Upload)")
+        if projekt.modell is not None:
+            _press = berechne_press_r2(projekt.modell)
+            if _press.get("berechenbar"):
+                _pruefe(True, f"Modell gefittet: R²_pred = {_press['r2_pred']:.2f} "
+                              f"(R² = {projekt.modell.rsquared:.2f})", "")
+            else:
+                _pruefe(True, f"Modell gefittet (R² = {projekt.modell.rsquared:.2f}, "
+                              f"Vorhersagegüte nicht bewertbar)", "")
+            _k = getattr(projekt.modell, "_kruemmung", None)
+            if _k and _k.get("signifikant"):
+                offen.append("Krümmung erkannt, aber keinem Faktor zuordenbar — "
+                             "im Bericht diskutieren")
+        else:
+            _pruefe(False, "", "Modell fehlt — „Regressionsmodell berechnen“ ausführen")
+        naechstes = ("Weiter mit <strong>IMPROVE</strong>: Konturplots ansehen, "
+                     "optimale Einstellung berechnen, Konfirmationswürfe machen.")
+    elif phase == "IMPROVE":
+        if projekt.optimale_einstellung:
+            _s = projekt.optimale_einstellung.get("strategie_label",
+                                                  projekt.optimale_einstellung.get("strategie", ""))
+            _v = projekt.optimale_einstellung.get("vorhersage")
+            _txt = f"Optimale Einstellung gefunden ({_s})"
+            if _v is not None:
+                _txt += f" — Vorhersage {_v:.0f} cm"
+            _pruefe(True, _txt, "")
+        else:
+            _pruefe(False, "", "Optimierung fehlt")
+        _pruefe(len(projekt.konfirmation_wuerfe) > 0,
+                f"Konfirmation: {len(projekt.konfirmation_wuerfe)} Würfe "
+                f"(μ={np.mean(projekt.konfirmation_wuerfe):.1f} cm)"
+                if len(projekt.konfirmation_wuerfe) > 0 else "",
+                "Konfirmationswürfe fehlen")
+        if projekt.konfirmation_ergebnis:
+            erledigt.append(f"Bewertung: {projekt.konfirmation_ergebnis.get('bewertung', '')}")
+        naechstes = ("Weiter mit <strong>CONTROL</strong>: Prozess-Stabilität "
+                     "prüfen und Cpk berechnen.")
+    elif phase == "CONTROL":
+        _pruefe(bool(projekt.cpk_ergebnis),
+                f"Prozessfähigkeit: Cpk = {projekt.cpk_ergebnis['cpk']:.2f}"
+                if projekt.cpk_ergebnis else "",
+                "Cpk fehlt — Konfirmationsdaten nötig")
+        naechstes = ("Fast geschafft: <strong>Reflexion</strong> ausfüllen und die "
+                     "<strong>finale ZIP</strong> exportieren — sie ist eure Abgabe-Grundlage.")
+    else:
+        naechstes = "Weiter im Notebook."
+
+    erledigt_html = "".join(f"<li>✅ {t}</li>" for t in erledigt if t)
+    offen_html = "".join(f"<li>⚠️ {t}</li>" for t in offen if t)
+    html = f"""
+    <div style="padding:14px; border:2px solid {GREEN}; border-radius:8px;
+                background:#F0FDF4; margin:10px 0;">
+        <h3 style="margin:0 0 8px 0; color:{GREEN};">🏁 Checkpoint: Phase {phase}</h3>
+        <ul style="margin:4px 0; padding-left:20px; line-height:1.6;">
+            {erledigt_html}{offen_html}
+        </ul>
+        <hr style="border:none; border-top:1px solid {GREEN}40; margin:10px 0;">
+        <div><strong>Nächster Schritt:</strong> {naechstes}</div>
     </div>"""
     display(HTML(html))

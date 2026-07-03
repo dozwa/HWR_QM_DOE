@@ -21,7 +21,11 @@ _CONTROL_73_TITLE_I_MR_KONTROLLKARTE_STABI = r"""if len(projekt.konfirmation_wue
     helper._save_fig(projekt, fig, "control_imr")
     plt.show()
 
-    helper.zeige_stabilitaet(projekt.imr_ergebnis)"""
+    helper.zeige_stabilitaet(projekt.imr_ergebnis)
+else:
+    print("⚠️ Keine Konfirmationswürfe vorhanden — führt in IMPROVE die")
+    print("   Konfirmation durch (Excel-Upload oder manuelle Eingabe) und")
+    print("   führt diese Zelle danach erneut aus.")"""
 
 _CONTROL_74_DETAILS_STYLE_MARGIN_10PX_0_PA = r"""<details style="margin:10px 0; padding:8px; background:#F9FAFB; border:1px solid #E5E7EB; border-radius:6px;">
 <summary style="cursor:pointer; font-weight:bold; color:#2563EB;">
@@ -58,7 +62,9 @@ _CONTROL_75_TITLE_NORMALVERTEILUNGSPR_FUNG = r"""if len(projekt.konfirmation_wue
             (float('inf'), "✅", "Normalverteilungsannahme beibehalten – Cpk ist aussagekräftig"),
         ]
         helper.zeige_ampel(norm_test['shapiro_p'], shapiro_schwellen,
-                          titel="Shapiro-Wilk p-Wert:")"""
+                          titel="Shapiro-Wilk p-Wert:")
+else:
+    print("⚠️ Keine Konfirmationswürfe vorhanden — erst IMPROVE-Konfirmation, dann hier weiter.")"""
 
 _CONTROL_76_PROZESSF_HIGKEIT_CPK_WAS_BEDEU = r"""### Prozessfähigkeit (Cpk) – Was bedeutet das?
 
@@ -88,7 +94,9 @@ _CONTROL_77_TITLE_PROZESSF_HIGKEIT_CPK = r"""if len(projekt.konfirmation_wuerfe)
 
     fig = helper.plot_cpk_verteilung(cpk)
     helper._save_fig(projekt, fig, "control_cpk_verteilung")
-    plt.show()"""
+    plt.show()
+else:
+    print("⚠️ Keine Konfirmationswürfe vorhanden — erst IMPROVE-Konfirmation, dann hier weiter.")"""
 
 _CONTROL_78_TITLE_VORHER_NACHHER_ZIELSCHEI = r"""if len(projekt.baseline_wuerfe) > 0 and len(projekt.konfirmation_wuerfe) > 0:
     fig = helper.plot_vorher_nachher(
@@ -98,7 +106,14 @@ _CONTROL_78_TITLE_VORHER_NACHHER_ZIELSCHEI = r"""if len(projekt.baseline_wuerfe)
     helper._save_fig(projekt, fig, "control_vorher_nachher")
     plt.show()
 
-    helper.hinweis_bericht("Cpk-Wert, Kontrollkarte und Vorher/Nachher-Zielscheibe sind die drei zentralen Control-Outputs.")"""
+    helper.hinweis_bericht("Cpk-Wert, Kontrollkarte und Vorher/Nachher-Zielscheibe sind die drei zentralen Control-Outputs.")
+else:
+    _fehlt = []
+    if len(projekt.baseline_wuerfe) == 0:
+        _fehlt.append("Baseline-Würfe (MEASURE)")
+    if len(projekt.konfirmation_wuerfe) == 0:
+        _fehlt.append("Konfirmationswürfe (IMPROVE)")
+    print(f"⚠️ Für den Vorher/Nachher-Vergleich fehlen: {', '.join(_fehlt)}.")"""
 
 _CONTROL_79_DETAILS_STYLE_MARGIN_10PX_0_PA = r"""<details style="margin:10px 0; padding:8px; background:#F9FAFB; border:1px solid #E5E7EB; border-radius:6px;">
 <summary style="cursor:pointer; font-weight:bold; color:#2563EB;">
@@ -106,18 +121,21 @@ _CONTROL_79_DETAILS_STYLE_MARGIN_10PX_0_PA = r"""<details style="margin:10px 0; 
 </summary>
 <div style="margin-top:8px; padding:8px; font-size:0.95em;">
 
-Der **Cpk** (Process Capability Index) misst, wie gut euer Prozess in die Spezifikationsgrenzen passt:
+Was steckt hinter den Schwellen aus der Tabelle oben (< 0,67 / 1,0 / 1,33)?
+Der Cpk übersetzt sich direkt in einen **Ausschuss-Anteil** (bei Normalverteilung):
 
-$$Cpk = \min\left(\frac{USL - \bar{x}}{3\sigma}, \frac{\bar{x} - LSL}{3\sigma}\right)$$
+| Cpk | Werte innerhalb der Spezifikation | Ausschuss |
+|-----|-----------------------------------|-----------|
+| 0,67 | ≈ 95,45 % | ≈ 45.500 ppm |
+| 1,0 | ≈ 99,73 % | ≈ 2.700 ppm |
+| 1,33 | ≈ 99,994 % | ≈ 63 ppm |
+| 2,0 („Six Sigma") | ≈ 99,9999998 % | ≈ 0,002 ppm* |
 
-**Interpretation:**
-- Cpk < 0: Mittelwert außerhalb der Spezifikation
-- Cpk 0–1.0: Prozess passt nicht sicher in die Toleranz
-- Cpk 1.0–1.33: Akzeptabel
-- Cpk > 1.33: Gut (industrieller Standard)
-- Cpk > 1.67: Exzellent
+Zwei Details:
+- Cpk < 0 bedeutet: Der **Mittelwert** liegt bereits außerhalb der Spezifikation.
+- Der Cpk nimmt das *schlechtere* der beiden Abstände (zur oberen und unteren Grenze) — ein dezentrierter Prozess wird also bestraft, selbst wenn er wenig streut.
 
-Ein Cpk von 1.0 bedeutet: 99,73% der Werte liegen innerhalb der Spezifikation (bei Normalverteilung). Bei Cpk = 1.33 sind es 99,994%.
+*\*Das berühmte „3,4 ppm" von Six Sigma rechnet zusätzlich einen 1,5σ-Langzeit-Shift ein.*
 </div>
 </details>"""
 

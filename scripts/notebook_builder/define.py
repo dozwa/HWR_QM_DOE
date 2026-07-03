@@ -334,11 +334,11 @@ def cells():
         md(_DEFINE_07B_OFAT_ANLEITUNG),
         colab_code("📝 Initiale Einstellung eintragen", _DEFINE_07C_INITIALE_EINSTELLUNG),
         md(_DEFINE_08_TESTW_RFE_DURCHF_HREN),
+        md(_DEFINE_15_DETAILS_STYLE_MARGIN_10PX_0_PA),
         colab_code("📝 Testwürfe eingeben", _DEFINE_09_TITLE_TESTW_RFE_EINGEBEN),
         colab_code("📊 Testwurf-Auswertung", _DEFINE_10_TITLE_TESTWURF_AUSWERTUNG),
         md(_DEFINE_12_PROJEKTCHARTER),
         colab_code("📝 Projektcharter ausfüllen", _DEFINE_13_TITLE_PROJEKTCHARTER_AUSF_LLEN),
         md(_DEFINE_14_DIV_STYLE_PADDING_10PX_BORDER),
-        md(_DEFINE_15_DETAILS_STYLE_MARGIN_10PX_0_PA),
         phase_export_cell("DEFINE"),
     ]

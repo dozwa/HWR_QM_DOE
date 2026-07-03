@@ -33,8 +33,11 @@ def colab_code(title: str, body: str) -> NotebookNode:
 
 
 def phase_export_cell(phase: str) -> NotebookNode:
-    title = f"💾 Ergebnisse bis {phase} auf Google Drive speichern"
-    body = f'helper.exportiere_phase_auf_drive(projekt, "{phase}")\n'
+    title = f"🏁 Checkpoint: Phase {phase} abschließen und sichern"
+    body = (
+        f'helper.zeige_phasen_checkpoint(projekt, "{phase}")\n'
+        f'helper.exportiere_phase_auf_drive(projekt, "{phase}")\n'
+    )
     return colab_code(title, body)
 
 

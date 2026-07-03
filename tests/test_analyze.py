@@ -13,14 +13,16 @@ from tests import virtuelle_gruppe as vg
 # ─────────────────────────────────────────────────────────────
 
 def test_versuchsplan_groesse_vollfaktoriell():
-    """Voll-faktoriell: 2^k × wiederholungen + centerpoints_total."""
+    """Voll-faktoriell: 2^k × wiederholungen + centerpoints (CPs werden
+    nicht mit den Wiederholungen multipliziert)."""
     faktoren = [dict(f) for f in vg.FAKTOREN_KATALOG]
     for f in faktoren:
         f.pop("_statapult_key", None)
     plan = helper.generiere_versuchsplan(faktoren, wiederholungen=2, centerpoints=3,
                                           seed=1, design="voll")
-    # 2^3 = 8 Ecken × 2 Wiederholungen = 16 Ecken + 3 CPs × 2 Wiederholungen = 22
-    assert len(plan) == 8 * 2 + 3 * 2
+    # 2^3 = 8 Ecken × 2 Wiederholungen = 16 Ecken + 3 Centerpoints = 19
+    assert len(plan) == 8 * 2 + 3
+    assert (plan["Typ"] == "Centerpoint").sum() == 3
 
 
 def test_versuchsplan_kodierte_spalten_sind_pm_1_oder_0():

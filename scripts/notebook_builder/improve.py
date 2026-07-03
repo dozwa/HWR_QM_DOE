@@ -84,9 +84,18 @@ _IMPROVE_60_TITLE_OPTIMALE_EINSTELLUNGEN_B = r"""# Strategie wählen: "mittelwer
 strategie = "dual" #@param ["mittelwert", "varianz", "dual"] {type:"string"}
 lambda_gewicht = 0.01 #@param {type:"number"}
 
+# σ_MSA aus MEASURE: weitet das Vorhersageintervall realistisch
+_sigma_msa = helper.sigma_msa_aus_projekt(projekt)
+if _sigma_msa:
+    print(f"ℹ️ Eure Mess-Streuung aus MEASURE (σ_MSA = {_sigma_msa:.1f} cm) wird")
+    print(f"   ins Vorhersageintervall (PI) einbezogen. Das PI ist die Spanne, in")
+    print(f"   der ein EINZELNER neuer Wurf voraussichtlich landet — Details im")
+    print(f"   Abschnitt 'Für Neugierige: PI vs. CI' weiter unten.")
+
 projekt.optimale_einstellung = helper.optimiere_einstellungen(
     projekt.modell, projekt.zielweite, projekt.faktoren,
-    strategie=strategie, lambda_gewicht=lambda_gewicht
+    strategie=strategie, lambda_gewicht=lambda_gewicht,
+    sigma_msa=_sigma_msa
 )
 helper.zeige_optimierung(projekt.optimale_einstellung)
 
@@ -108,6 +117,10 @@ Nutzt das Regressionsmodell, um für **beliebige Faktoreinstellungen** die Wurfw
 - Die Kodierungstabelle findet ihr in der Formel-Anzeige oben"""
 
 _IMPROVE_63_TITLE_PROGNOSETOOL_WURFWEITE_V = r"""import ipywidgets as _widgets
+
+if projekt.modell is None:
+    raise SystemExit("⚠️ Kein Modell vorhanden — bitte zuerst in ANALYZE "
+                     "'Regressionsmodell berechnen' ausführen.")
 
 # Nur die Faktoren verwenden, die auch tatsächlich im Modell sind
 _faktoren_prognose = helper._effektive_faktoren(projekt)
@@ -193,12 +206,15 @@ for _f in _faktoren_prognose:
 
 _output = _widgets.Output()
 
+_sigma_msa_prog = helper.sigma_msa_aus_projekt(projekt)
+
 def _berechne_prognose(_btn):
     _output.clear_output()
     with _output:
         werte = {f['name']: float(t.value) for f, t in _faktor_inputs}
         ergebnis = helper.prognostiziere(
-            projekt.modell, _faktoren_prognose, werte
+            projekt.modell, _faktoren_prognose, werte,
+            sigma_msa=_sigma_msa_prog
         )
         helper.zeige_prognose(
             ergebnis, _faktoren_prognose, werte,
@@ -240,7 +256,8 @@ _IMPROVE_64_VISUELLE_VS_ANALYTISCHE_OPTIMI = r"""### 🔍 Visuelle vs. analytisc
 ➡️ Der Konturplot hilft euch zu **verstehen**, der Optimizer liefert die **exakten Werte**."""
 
 _IMPROVE_65_TITLE_VERGLEICH_ALLE_DREI_OPTI = r"""ergebnisse = helper.vergleiche_optimierungen(
-    projekt.modell, projekt.zielweite, projekt.faktoren
+    projekt.modell, projekt.zielweite, projekt.faktoren,
+    sigma_msa=helper.sigma_msa_aus_projekt(projekt)
 )
 # Das Ergebnis der gewählten Strategie wird für die Konfirmation verwendet.
 print(f"\n→ Für die Konfirmation wird die Strategie '{strategie}' verwendet.")"""
@@ -375,7 +392,8 @@ _IMPROVE_70_TITLE_KONFIRMATION_AUSWERTEN = r"""if len(projekt.konfirmation_wuerf
     ergebnis = helper.analysiere_konfirmation(
         projekt.konfirmation_wuerfe,
         opt["vorhersage"], opt["pi_low"], opt["pi_high"],
-        projekt.zielweite, projekt.toleranz
+        projekt.zielweite, projekt.toleranz,
+        ci_low=opt.get("ci_low"), ci_high=opt.get("ci_high")
     )
     projekt.konfirmation_ergebnis = ergebnis
     helper.zeige_konfirmation(ergebnis)
